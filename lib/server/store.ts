@@ -1,6 +1,6 @@
 import 'server-only';
 import { createClient } from '@supabase/supabase-js';
-import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, rm, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -79,6 +79,20 @@ export async function removeObject(key:string) {
   if (localDemo()) {await rm(localObject(key),{force:true});return;}
   const {error}=await adminClient().storage.from('studio').remove([key]);
   if (error) throw new HttpError(503,'The temporary upload could not be removed.');
+}
+export async function listObjects(prefix:string):Promise<{key:string;createdAt:string}[]> {
+  if(localDemo()) {
+    const dir=localObject(prefix);
+    let names:string[];try {names=await readdir(dir);} catch(e) {if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e;}
+    return Promise.all(names.map(async name=>({key:prefix+'/'+name,createdAt:(await stat(path.join(dir,name))).birthtime.toISOString()})));
+  }
+  const files:{key:string;createdAt:string}[]=[];
+  for(let offset=0;;offset+=1000) {
+    const {data,error}=await adminClient().storage.from('studio').list(prefix,{limit:1000,offset,sortBy:{column:'name',order:'asc'}});
+    if(error) throw new HttpError(503,'Temporary imports could not be checked. Try again.');
+    for(const f of data || []) if(f.id && f.created_at) files.push({key:prefix+'/'+f.name,createdAt:f.created_at});
+    if(!data || data.length<1000) return files;
+  }
 }
 export async function downloadUrl(key:string,assetId:string) {
   if (localDemo()) return `/api/assets/${assetId}`;

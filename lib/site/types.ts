@@ -1,5 +1,10 @@
 export interface SiteImage { path: string; alt: string; width: number; height: number }
 export interface SiteFAQ { question: string; answer: string }
+export interface SiteReview {
+  quote:string; author:string; sourceUrl:string; checkedAt:string;
+  kind?:'quote'|'summary'; rating?:number|null; dateLabel?:string;
+  platform?:string; attribution?:string; snapshotContext?:string;
+}
 export interface SiteService {
   id: string; title: string; summary: string; body: string; dedicatedPage: boolean;
   seoTitle: string; seoDescription: string; faqs: SiteFAQ[];
@@ -16,7 +21,7 @@ export interface ClinicSiteConfig {
   socials: { label: string; url: string }[];
   rating: { value: number | null; count: number | null; checkedAt: string; sourceUrl: string };
   services: SiteService[];
-  reviews: { quote: string; author: string; sourceUrl: string; checkedAt: string }[];
+  reviews: SiteReview[];
   faqs: SiteFAQ[];
   clinicians: { name: string; credentials: string }[];
   sections: { about: boolean; services: boolean; reviews: boolean; faq: boolean; contact: boolean };

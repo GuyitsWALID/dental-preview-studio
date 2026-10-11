@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 const config: NextConfig = {
+  ...(process.env.STUDIO_TEST_BUILD_DIR ? {distDir:process.env.STUDIO_TEST_BUILD_DIR} : {}),
   serverExternalPackages: ['sharp', 'exceljs'],
   outputFileTracingExcludes: {
     '/*': ['./.cache/**/*','./.local-studio/**/*','./tests/**/*','./test-results/**/*','./playwright-report/**/*']

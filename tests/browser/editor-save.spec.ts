@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // The filesystem demo retains key order; Supabase JSONB does not.
 function reorderKeys(value:unknown):unknown {

@@ -24,7 +24,7 @@ npm run dev
 
 Local mode saves to `.local-studio/`, is bound to loopback by the npm command, and bypasses authentication **only when NODE_ENV is development**. Never expose the development server publicly. The production server ignores this flag. Do not import real prospect data into a development server exposed through a tunnel. Optional `STUDIO_LOCAL_DATA_DIR` chooses a separate directory inside this workspace; browser tests use it for isolation when they launch their own server.
 
-The first workspace contains OLI, linked to its Maps place ID and the **Proposal requested** stage. Import either supplied workbook using **Import spreadsheet**, review changes, then confirm. They produce 49 contactable prospects, including 13 high priority; importing both preserves 49. Workbooks remain unchanged. New clinic projects prefill only supplied name/address/phone/review snapshot and use neutral copy with no OLI services, quotes or photos. A phone does not enable WhatsApp until explicitly confirmed.
+The first workspace contains OLI, linked to its Maps place ID and the **Proposal requested** stage. Import previews are paginated in groups of 50. Full source data is staged privately for one hour; confirmation sends only the stage reference and workspace revision. Cancelled stages are removed, and expired stages are pruned on the next import. Long values are shortened only in the preview. Import either supplied workbook using **Import spreadsheet**, review changes, then confirm. They produce 49 contactable prospects, including 13 high priority; importing both preserves 49. Workbooks remain unchanged. New clinic projects prefill only supplied name/address/phone/review snapshot and use neutral copy with no OLI services, quotes or photos. A phone does not enable WhatsApp until explicitly confirmed.
 
 ## Supabase setup
 
@@ -58,7 +58,7 @@ The bucket permits generated SVG favicon files; **image uploads still reject SVG
 
 ## Deploy to Vercel
 
-1. Put the project in a private Git repository; exclude `.env*`, `.local-studio/`, `.cache/`, `.next/` and `node_modules/`. `.gitignore` is included. The original standalone OLI files remain in place but the Next.js app handles the studio routes.
+1. Put the project in a private Git repository; exclude `.env*`, `.local-studio/`, `.cache/`, `.next/` and `node_modules/`. `.gitignore` is included. The active application lives in `app/`; the original standalone OLI prototype is retained in Git history.
 2. Import that repository into Vercel. Choose **Next.js**, Node.js **24.x**, install command `npm ci`, build command `npm run build`.
 3. Configure the four Supabase variables for the appropriate deployment environments. Leave `STUDIO_LOCAL_DEMO` unset or `0`.
 4. Deploy. Add the final studio URL in Supabase Auth URL settings. Email/password sign-in uses cookies; there is no OAuth callback flow.
@@ -67,19 +67,31 @@ The bucket permits generated SVG favicon files; **image uploads still reject SVG
 
 Publishing uses the studio domain's stable **path** `/preview/clinic-slug/`; wildcard DNS or per-clinic subdomains are not required by this version. The clinic slug locks after first publication. Your final clinic domain is used only in production ZIP output; final hosting and DNS remain manual.
 
-Vercel function responses never contain a ZIP. The browser downloads authorized image URLs and public local fonts, then assembles the archive. Preview publication writes small files to Supabase first, then switches the saved release pointer with optimistic concurrency. If storage or the pointer update fails, the existing preview stays intact. Very large prospect collections are outside this small, single-owner JSON-workspace design; supported imports are capped at 2 MB compressed / 30 MB expanded / 2,000 rows.
+Vercel function responses never contain a ZIP. The browser downloads authorized image URLs and public local fonts, then assembles the archive. Preview publication writes small files to Supabase first, then switches the saved release pointer with optimistic concurrency. If storage or the pointer update fails, the existing preview stays intact and attempted release files are removed after all uploads settle. Cleanup failures identify the private object keys in server logs for manual removal. Workspace JSON responses stream after owner authorization so a confirmed import can be read even when its provenance exceeds the buffered-response limit. Very large prospect collections are outside this small, single-owner JSON-workspace design; supported imports are capped at 2 MB compressed / 30 MB expanded / 2,000 rows.
 
 ## Daily workflow
 
-- **Prospects:** import `.xlsx`, inspect detected columns and changes, acknowledge skipped invalid/ambiguous rows, search/filter, shortlist and track outreach. Research dates, evidence, source rows, cached formula results and blanks are preserved. Scores are the workbook's outreach heuristic, not purchase probability: 40 base + 20 for phone + min(reviews / 50 × 20, 20) + 20 for rating ≥4.5 (10 for ≥4). Source social notes are separate from usable HTTPS profile links.
+- **Prospects:** import `.xlsx`, inspect detected columns and changes, acknowledge skipped invalid/ambiguous rows, search/filter, shortlist and track outreach. Research dates, evidence, source rows, cached formula results and blanks are preserved. Scores are the workbook's outreach heuristic, not purchase probability: 40 base + 20 for phone + min(reviews / 50 × 20, 20) + 20 for rating ≥4.5 (10 for ≥4). Source social notes are separate from usable HTTPS profile links. Hyperlink targets are retained separately from original cell labels.
 - **Re-import:** match Maps place ID first, then normalized name/address. Conflicting IDs, duplicate rows and multiple matches are flagged. Confirmed nonblank source facts update; blanks do not erase previous nonblank facts. Manual overrides, notes, shortlist, stages and projects survive. Prospect edits and existing website copy remain independently editable.
 - **Editor:** change branding, images, copy, services, team, location, hours, socials, reviews, FAQs and metadata. Preview desktop/mobile and optional service/contact pages. Save before publishing or exporting. Uploaded assets are private until included in a published release.
 - **Publish:** creates an immutable release. Asset links contain the release ID, so a page already open retains its matching CSS/images/fonts after an update. Old release assets remain available while the project is published. Unpublish blocks all its releases through the public route. Unknown paths return 404. Removing a link cannot revoke files someone already downloaded.
 - **Export:** working draft ZIPs are noindex and demo-only. Production requires a final HTTPS origin and configured contact method. The archive includes `site/`, `source/` and instructions. Only public clinic fields and selected website assets are included; no prospect notes, credentials, Manus references or studio preview URLs. Copy `site/` contents to a normal static host with directory index serving.
 
+## Enriched workbook and review carousel
+
+The importer also reads `Clinic Details`, `Reviews` and `Assets` tables whose headers can follow a worksheet title. Clinic IDs link these tables within the workbook; the original Maps place ID links them to prospects. Conflicting or ambiguous identities are reported rather than attached to a different clinic. Cached formula results are read without executing formulas.
+
+The supplied upgraded workbook contains 49 clinic detail records and 27 paraphrased review summaries across three clinics. OLI has no collected review text in that file. A missing collection does not mean a clinic has no reviews. Existing OLI website excerpts remain separate and editable.
+
+After confirming an import, open a prospect to inspect enriched details, website corrections, branch conflicts, review candidates and asset references. Reimports preserve nonblank details and collected reviews; they do not replace website content. Asset pointers remain research links: verify the image, then upload it through the Brand tab. Images are not fetched automatically.
+
+In the editor, open **Care → Choose from imported clinic research**, select individual reviews, check their clinic/source attribution, then add them to the draft. Only selected public content enters the website or ZIP. Summaries stay labelled as paraphrases; verbatim excerpts can be entered manually or supplied in a `Review text — verbatim` column. Displayed individual stars use collected ratings; missing stars stay blank. Relative ages are labelled as ages at the source snapshot, not current dates. No review-star structured data is emitted.
+
+The responsive review strip loops continuously when its cards overflow, using inert visual copies excluded from keyboard and screen-reader navigation. Pause/resume, previous/next, swipe and arrow-key browsing are available. Hover and keyboard focus pause automatic movement; manual interaction pauses it until resumed. Reduced-motion users get a static, manually browsable strip. The same rendering and controls ship in preview releases and portable exports.
+
 ## Contact methods
 
-WhatsApp visitors review an encoded message and explicitly send it in WhatsApp. Confirm the clinic's enabled international number first. Email uses a clinic-specific Formspree ID; verify the recipient and configure allowed domains in Formspree. No SMTP secrets are needed. Forms provide validation, loading, success and failure behavior, with entries preserved on failure. They ask visitors to avoid medical records or sensitive health details. Pitch previews and unconfigured working ZIPs never send enquiries. No test sends a real enquiry to a clinic.
+WhatsApp visitors review an encoded message and explicitly send it in WhatsApp. Confirm the clinic's enabled international number including + and its country code first (for example, +251911234567). National numbers are never guessed. Email uses a clinic-specific Formspree ID; verify the recipient and configure allowed domains in Formspree. No SMTP secrets are needed. Forms provide validation, loading, success and failure behavior, with entries preserved on failure. They ask visitors to avoid medical records or sensitive health details. Pitch previews and unconfigured working ZIPs never send enquiries. No test sends a real enquiry to a clinic.
 
 ## SEO and AI-search deliverables
 
@@ -111,6 +123,6 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-For an already installed Chromium, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable. Browser tests start a loopback development server in local mode if port 3000 is free. Stop another studio dev server first for an isolated test run. Tests covering supplied workbooks require those files at the original Downloads paths; portable core tests still run elsewhere. Test exports and screenshots are under `.cache/`. Live Supabase RLS/auth/Storage and Vercel deployment need your project credentials and a post-deploy smoke check; local tests do not substitute for those live checks.
+For an already installed Chromium, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable. Browser tests always launch a separate local-demo server on port 3013 (override with `STUDIO_TEST_PORT`), with fresh data and a separate Next.js build directory. They refuse to reuse an existing server and assert demo mode before any test. Your normal development server may remain running on port 3000. Tests covering supplied workbooks require those files at the original Downloads paths; portable core tests still run elsewhere. Test exports and screenshots are under `.cache/`. Live Supabase RLS/auth/Storage and Vercel deployment need your project credentials and a post-deploy smoke check; local tests do not substitute for those live checks.
 
 No automatic outreach, pricing, maintenance commitments, billing, final client hosting or medical advice generation is included.

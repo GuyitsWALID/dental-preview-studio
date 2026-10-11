@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { requireOwner, assertSameOrigin, HttpError, localDemo, ownerId } from '@/lib/server/auth';
 import { readWorkspace, mutateWorkspace, adminClient, getObject, removeObject } from '@/lib/server/store';
 import { publishProject, prepareExport, saveImage, useOliCover, configHash } from '@/lib/server/projects';
-import { applyImport, previewImport, type ParsedImport } from '@/lib/prospects';
+import { confirmImport } from '@/lib/server/imports';
 import { createClinicConfig, slugify, validateSiteConfig, productionIssues, safeHttps } from '@/lib/site/renderer.mjs';
 import type { ClinicSiteConfig } from '@/lib/site/types';
 import { STAGES, factsOf, type LeadFacts, type Project } from '@/lib/types';
@@ -11,13 +11,25 @@ export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const fail = (error:unknown) => NextResponse.json({error:error instanceof Error?error.message:'The action could not be completed.'},{status:error instanceof HttpError?error.status:400});
 export async function GET() {
-  try {await requireOwner(); return NextResponse.json(await readWorkspace(),{headers:{'Cache-Control':'private, no-store'}}); } catch(error) {return fail(error);}
+  try {
+    await requireOwner();
+    // Source provenance can make a confirmed workspace exceed Vercel's
+    // buffered response limit. Stream JSON in bounded chunks after auth.
+    const bytes=new TextEncoder().encode(JSON.stringify(await readWorkspace()));
+    let offset=0;
+    const body=new ReadableStream<Uint8Array>({pull(controller){
+      if(offset>=bytes.length){controller.close();return;}
+      controller.enqueue(bytes.subarray(offset,offset+65536));offset+=65536;
+    }});
+    return new Response(body,{headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'private, no-store',...(localDemo()?{'X-Studio-Mode':'local-demo'}:{})}});
+  } catch(error) {return fail(error);}
 }
 export async function POST(request:Request) {
   try {
     await requireOwner(); assertSameOrigin(request);
     if (Number(request.headers.get('content-length'))>2*1024*1024) throw new HttpError(413,'This request is too large.');
     const body=await request.json(), action=body.action;
+    if (action==='confirmImport') return NextResponse.json(await confirmImport(String(body.importId || ''),body.revision,body.acceptSkipped===true),{headers:{'Cache-Control':'private, no-store'}});
     if (action==='publish') {return NextResponse.json({url:await publishProject(body.projectId)});}
     if (action==='export') {
       const {state}=await readWorkspace(), project=state.projects.find(p=>p.id===body.projectId);
@@ -42,14 +54,6 @@ export async function POST(request:Request) {
     }
     if (action==='oliCover') return NextResponse.json({asset:await useOliCover(body.projectId)});
     const result=await mutateWorkspace(state=>{
-      if (action==='confirmImport') {
-        const parsed=body.parsed as ParsedImport;
-        if (!parsed || !Array.isArray(parsed.rows) || parsed.rows.length>2000 || parsed.rows.some(r=>!r.facts || !r.provenance || typeof r.facts.name!=='string' || !Array.isArray(r.issues))) throw new HttpError(400,'Invalid import. Choose the workbook again.');
-        const current=previewImport(state.prospects,parsed);
-        if (current.some(e=>e.kind==='ambiguous' || e.kind==='invalid') && body.acceptSkipped!==true) throw new HttpError(400,'Review and acknowledge the rows that cannot be imported.');
-        const imported=applyImport(state.prospects,parsed);state.prospects=imported.prospects;
-        return {imported:current.filter(e=>e.kind==='new' || e.kind==='update').length};
-      }
       if (action==='updateProspect') {
         const p=state.prospects.find(p=>p.id===body.id);if(!p)throw new HttpError(404,'Prospect not found.');
         if (body.stage!==undefined) {if(!STAGES.includes(body.stage))throw new HttpError(400,'Choose a valid outreach stage.');p.stage=body.stage;}

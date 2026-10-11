@@ -1,0 +1,23 @@
+import { test, expect } from './fixtures';
+import ExcelJS from 'exceljs';
+test('2,000-row imports use bounded pages and tiny confirmations, preserve source and reject replay/stale stages',async({request})=>{
+  const headers={Origin:process.env.STUDIO_TEST_ORIGIN!},book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Outreach Ready');
+  sheet.addRow(['Clinic / Practice','Address / Area','Phone','Email','Social Media','Rating','Reviews','Website Status','SEO Presence','AEO Presence','Verification Confidence','Evidence / Reason','Google Maps','Verification Source','Lead Score','Priority','Outreach Status','Notes']);
+  for(let i=0;i<2000;i++)sheet.addRow([`Bulk Clinic ${i}`,`Bole ${i}`,'+251911234567',null,'Social profile not verified',4.8,55,'No website','Missing','Missing','High','Evidence '.repeat(60),{text:'Open map',hyperlink:`https://www.google.com/maps/search/?api=1&query_place_id=bulk-${i}`},'https://example.test',98,'High','Not contacted','Source note '.repeat(20)]);
+  const buffer=Buffer.from(await book.xlsx.writeBuffer());expect(buffer.length).toBeLessThan(2*1024*1024);
+  const upload=()=>request.post('/api/import',{headers,multipart:{file:{name:'bulk.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer}}});
+  const response=await upload();expect(response.status(),await response.text()).toBe(200);const text=await response.text(),payload=JSON.parse(text);
+  expect(Buffer.byteLength(text)).toBeLessThan(1024*1024);expect(payload.parsed.rows).toBeUndefined();expect(payload.entries).toHaveLength(50);expect(payload.totalRows).toBe(2000);expect(payload.counts.new).toBe(2000);
+  const last=await request.get(`/api/import?importId=${payload.importId}&offset=1950`);expect(last.status()).toBe(200);const page=await last.json();expect(page.entries[49].row.facts.name).toBe('Bulk Clinic 1999');expect(page.nextOffset).toBeNull();
+  expect((await request.get(`/api/import?importId=${payload.importId}&offset=-1`)).status()).toBe(400);
+  const body={action:'confirmImport',importId:payload.importId,revision:payload.revision};expect(JSON.stringify(body).length).toBeLessThan(200);
+  const confirmed=await request.post('/api/studio',{headers,data:body});expect(confirmed.status(),await confirmed.text()).toBe(200);expect((await confirmed.json()).imported).toBe(2000);
+  expect((await request.post('/api/studio',{headers,data:body})).status()).toBe(404);
+  const workspace=await (await request.get('/api/studio')).json(),imported=workspace.state.prospects.filter((p:any)=>p.source.name.startsWith('Bulk Clinic '));expect(imported).toHaveLength(2000);
+  expect(imported[1999].provenance.raw['Evidence / Reason']).toBe('Evidence '.repeat(60));expect(imported[1999].provenance.raw['Google Maps']).toBe('Open map');expect(imported[1999].source.mapsUrl).toContain('bulk-1999');expect(imported[1999].source.email).toBe('');
+  const again=await (await upload()).json();expect(again.counts.new).toBe(0);expect(again.counts.unchanged).toBe(2000);
+  const p=workspace.state.prospects[0];expect((await request.post('/api/studio',{headers,data:{action:'updateProspect',id:p.id,notes:p.notes,revision:workspace.revision}})).status()).toBe(200);
+  expect((await request.post('/api/studio',{headers,data:{action:'confirmImport',importId:again.importId,revision:again.revision}})).status()).toBe(409);
+  expect((await request.delete('/api/import?importId='+again.importId,{headers})).status()).toBe(200);expect((await request.get('/api/import?importId='+again.importId)).status()).toBe(404);
+  expect((await request.post('/api/studio',{headers,data:{action:'confirmImport',parsed:payload.parsed,revision:workspace.revision}})).status()).toBe(400);
+});

@@ -9,11 +9,12 @@ try {
   let ready=false;for(let i=0;i<100;i++){try{const r=await fetch(base+'/login');if(r.ok){ready=true;break;}}catch{}if(server.exitCode!==null)throw new Error(output);await delay(200);}
   assert.ok(ready,'Production server did not become ready. '+output);
   const home=await fetch(base+'/',{redirect:'manual'});assert.equal(home.status,307);assert.equal(new URL(home.headers.get('location'),base).pathname,'/login');
-  for(const route of ['/api/studio','/api/assets/00000000-0000-4000-8000-000000000001']){
+  for(const route of ['/api/studio','/api/import?importId=00000000-0000-4000-8000-000000000001','/api/assets/00000000-0000-4000-8000-000000000001']){
     const r=await fetch(base+route);assert.equal(r.status,401,route);const text=await r.text();assert.ok(!text.includes('prospects'));assert.ok(!text.includes('test-server-key'));
   }
   for(const route of ['/api/studio','/api/import','/api/upload']){
     const r=await fetch(base+route,{method:'POST',headers:{Origin:base,'Content-Type':'application/json'},body:JSON.stringify({action:'export',projectId:'00000000-0000-4000-8000-000000000002'})});assert.equal(r.status,401,route);
   }
+  assert.equal((await fetch(base+'/api/import?importId=00000000-0000-4000-8000-000000000001',{method:'DELETE',headers:{Origin:base}})).status,401);
   console.log('PASS: anonymous production visitors cannot open the dashboard, prospect records, assets, editing, imports, uploads or exports. Development demo flag is ignored.');
 } finally {server.kill();}

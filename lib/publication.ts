@@ -1,5 +1,23 @@
 import { renderClinicSite, safeAssetPath } from './site/renderer.mjs';
 import type { Project, Workspace, Release, Asset } from './types';
+// Finish every in-flight upload before compensating for a failed publication.
+// The release pointer is committed only after all files have been stored.
+export async function storeRelease<T>(files:{key:string;bytes:Uint8Array;mime:string}[],put:(key:string,bytes:Uint8Array,mime:string)=>Promise<void>,remove:(key:string)=>Promise<void>,commit:()=>Promise<T>):Promise<T> {
+  try {
+    const results=await Promise.allSettled(files.map(f=>put(f.key,f.bytes,f.mime)));
+    const failure=results.find((r):r is PromiseRejectedResult=>r.status==='rejected');
+    if(failure) throw failure.reason;
+    return await commit();
+  } catch(error) {
+    const results=await Promise.allSettled(files.map(f=>remove(f.key)));
+    const failed=files.filter((_,i)=>results[i].status==='rejected').map(f=>f.key);
+    if(failed.length) {
+      console.error('Failed release cleanup; remove these private objects:',failed);
+      throw new Error('Publication failed and temporary release files could not all be removed. The previous preview is unchanged. Retry cleanup using the server log.');
+    }
+    throw error;
+  }
+}
 export const fileMime = (p:string) => p.endsWith('.html')?'text/html; charset=utf-8':p.endsWith('.css')?'text/css; charset=utf-8':p.endsWith('.js') || p.endsWith('.mjs')?'text/javascript; charset=utf-8':p.endsWith('.woff2')?'font/woff2':p.endsWith('.svg')?'image/svg+xml':p.endsWith('.webp')?'image/webp':p.endsWith('.jpg')?'image/jpeg':p.endsWith('.png')?'image/png':p.endsWith('.xml')?'application/xml; charset=utf-8':'text/plain; charset=utf-8';
 export function projectAssets(project:Project,state:Workspace): Asset[] {
   const paths=[project.config.logo,project.config.heroImage,project.config.coverImage].filter(Boolean).map(x=>x!.path);

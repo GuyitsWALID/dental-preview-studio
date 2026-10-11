@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp, { type Metadata } from 'sharp';
 import { ownerId, HttpError } from './auth';
-import { getObject, putObject, readWorkspace, mutateWorkspace, downloadUrl } from './store';
-import { projectAssets, fileMime, releaseManifest } from '../publication';
+import { getObject, putObject, removeObject, readWorkspace, mutateWorkspace, downloadUrl } from './store';
+import { projectAssets, fileMime, releaseManifest, storeRelease } from '../publication';
 import type { Asset, Project } from '../types';
 export const configHash = (config:unknown) => createHash('sha256').update(JSON.stringify(config)).digest('hex');
 export async function saveImage(bytes:Buffer):Promise<Asset> {
@@ -42,16 +42,16 @@ export async function publishProject(projectId:string) {
   const hash=configHash(project.config),id=randomUUID(),manifest=releaseManifest(project,id),assets=projectAssets(project,state);
   const files:Record<string,{key:string;mime:string}>={};
   const payloads=[...Object.entries(manifest).map(([p,body])=>({path:p,bytes:Buffer.from(body)})),...await fontFiles(),...await Promise.all(assets.map(async a=>({path:a.path,bytes:await getObject(a.storageKey)})))];
-  await Promise.all(payloads.map(async item=>{
+  const uploads=payloads.map(item=>{
     const key=`${ownerId()}/releases/${id}/${item.path}`,mime=fileMime(item.path);
-    await putObject(key,item.bytes,mime); files[item.path]={key,mime};
-  }));
-  await mutateWorkspace(current=>{
+    files[item.path]={key,mime};return {key,mime,bytes:item.bytes};
+  });
+  await storeRelease(uploads,putObject,removeObject,()=>mutateWorkspace(current=>{
     const p=current.projects.find(p=>p.id===projectId);
     if (!p || configHash(p.config)!==hash) throw new HttpError(409,'The draft changed during publication. Publish the saved draft again.');
     current.releases.push({id,projectId,createdAt:new Date().toISOString(),published:true,files});
     p.publishedReleaseId=id;p.publishedConfigHash=hash;
-  });
+  }));
   return `/preview/${project.slug}/`;
 }
 export async function prepareExport(project:Project,mode:'draft'|'production') {
