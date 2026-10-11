@@ -1,6 +1,7 @@
 import type { ClinicSiteConfig, FileManifest, RenderOptions } from './types';
 export function createClinicConfig(input?: {name?: string; address?: string; phone?: string; mapsUrl?: string; rating?: number | null; reviews?: number | null; checkedAt?: string}): ClinicSiteConfig;
 export function validateSiteConfig(config: ClinicSiteConfig): string[];
+export function serializeSiteConfig(config: ClinicSiteConfig): string;
 export function productionIssues(config: ClinicSiteConfig): string[];
 export function renderClinicSite(config: ClinicSiteConfig, options?: RenderOptions): FileManifest;
 export function safeHttps(value: unknown, hosts?: string[]): string;

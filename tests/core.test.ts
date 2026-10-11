@@ -8,11 +8,20 @@ import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 import { parseWorkbook, applyImport, previewImport, scoreExplanation } from '../lib/prospects';
 import { initialWorkspace } from '../lib/seed';
-import { createClinicConfig, renderClinicSite, validateSiteConfig, productionIssues } from '../lib/site/renderer.mjs';
+import { createClinicConfig, renderClinicSite, validateSiteConfig, productionIssues, serializeSiteConfig } from '../lib/site/renderer.mjs';
 import { releaseManifest, resolvePreview } from '../lib/publication';
 import { buildProjectZip, type ExportBundle } from '../lib/export';
 
 const originals=['C:/Users/walid/Downloads/addis_ababa_dental_outreach_ready.xlsx','C:/Users/walid/Downloads/Copy of addis_ababa_dental_outreach_ready.xlsx'];
+test('saved configuration comparison ignores JSONB object-key order but preserves real edits and list order',()=>{
+  const draft=createClinicConfig({name:'Audit Clinic'});
+  draft.phones=['+251911234567','+251922345678'];
+  const reordered=JSON.parse(JSON.stringify(draft,(_key,value)=>value && typeof value==='object' && !Array.isArray(value)?Object.fromEntries(Object.entries(value).reverse()):value));
+  assert.notEqual(JSON.stringify(draft),JSON.stringify(reordered));
+  assert.equal(serializeSiteConfig(draft),serializeSiteConfig(reordered));
+  reordered.hero.title='A real copy edit';assert.notEqual(serializeSiteConfig(draft),serializeSiteConfig(reordered));
+  reordered.hero.title=draft.hero.title;reordered.phones.reverse();assert.notEqual(serializeSiteConfig(draft),serializeSiteConfig(reordered));
+});
 test('both supplied workbooks import 49 prospects without duplicates or loss of OLI stage',async t=>{
   let buffers:Buffer[];try{buffers=await Promise.all(originals.map(p=>readFile(p)));}catch{t.skip('Original local workbooks are unavailable on this machine.');return;}
   const first=await parseWorkbook(buffers[0],path.basename(originals[0])),second=await parseWorkbook(buffers[1],path.basename(originals[1]));
