@@ -1,0 +1,11 @@
+import type { ClinicSiteConfig, FileManifest, RenderOptions } from './types';
+export function createClinicConfig(input?: {name?: string; address?: string; phone?: string; mapsUrl?: string; rating?: number | null; reviews?: number | null; checkedAt?: string}): ClinicSiteConfig;
+export function validateSiteConfig(config: ClinicSiteConfig): string[];
+export function productionIssues(config: ClinicSiteConfig): string[];
+export function renderClinicSite(config: ClinicSiteConfig, options?: RenderOptions): FileManifest;
+export function safeHttps(value: unknown, hosts?: string[]): string;
+export function validPhone(value: unknown): boolean;
+export function phoneDigits(value: unknown): string;
+export function safeAssetPath(value: unknown): boolean;
+export function slugify(value: unknown): string;
+export function escapeHtml(value: unknown): string;

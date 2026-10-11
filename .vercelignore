@@ -1,0 +1,7 @@
+.cache
+.local-studio
+test-results
+playwright-report
+node_modules
+.env.local
+.env.*.local

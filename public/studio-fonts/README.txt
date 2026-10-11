@@ -1,0 +1,1 @@
+Local open-source fonts. Individual licenses are included.

@@ -1,0 +1,2 @@
+'use client';
+export default function ErrorPage({reset}:{reset:()=>void}) {return <main className="setup-screen"><section className="login-card"><p className="overline">Workspace unavailable</p><h1>Let’s get you back in.</h1><p>The workspace could not be loaded. Check your connection and Supabase setup, then try again.</p><button className="btn primary" onClick={reset}>Try again</button></section></main>;}

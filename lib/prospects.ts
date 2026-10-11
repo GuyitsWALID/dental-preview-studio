@@ -1,0 +1,132 @@
+import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
+import { randomUUID } from 'node:crypto';
+import { safeHttps } from './site/renderer.mjs';
+import { STAGES, type LeadFacts, type Prospect, type Provenance } from './types';
+
+const columns: Record<string, keyof LeadFacts> = {
+  'Clinic / Practice':'name','Address / Area':'address','Phone':'phone','Email':'email',
+  'Rating':'rating','Reviews':'reviews','Website Status':'websiteStatus','SEO Presence':'seoPresence',
+  'AEO Presence':'aeoPresence','Verification Confidence':'confidence','Evidence / Reason':'evidence',
+  'Google Maps':'mapsUrl','Verification Source':'verificationSource','Lead Score':'score','Priority':'priority',
+  'Outreach Status':'importedStage','Notes':'notes'
+};
+export interface ImportedRow { facts: LeadFacts; provenance: Provenance; issues: string[] }
+export interface ParsedImport { filename: string; sheet: string; sheets: string[]; columns: string[]; researchDate: string; rows: ImportedRow[] }
+export interface ImportEntry { row: ImportedRow; kind: 'new' | 'update' | 'unchanged' | 'ambiguous' | 'invalid'; matchId?: string; changes: string[]; reason?: string }
+const norm = (v: string) => v.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ');
+const blank = (v: unknown) => v === '' || v === null || v === undefined || (Array.isArray(v) && !v.length);
+export function placeId(url: string) { try { const u=new URL(url); return u.searchParams.get('query_place_id') || u.searchParams.get('place_id') || ''; } catch { return ''; } }
+export function identity(f: LeadFacts) { return placeId(f.mapsUrl) || `${norm(f.name)}|${norm(f.address)}`; }
+function cellValue(v: ExcelJS.CellValue): string | number | null {
+  if (v == null) return null;
+  if (typeof v === 'object') {
+    if ('formula' in v || 'sharedFormula' in v) return cellValue(v.result as ExcelJS.CellValue);
+    if ('richText' in v) return v.richText.map(x=>x.text).join('');
+    if ('text' in v) return String(v.text);
+    if (v instanceof Date) return v.toISOString().slice(0,10);
+    return null;
+  }
+  return typeof v === 'number' ? v : String(v);
+}
+const text = (v: unknown) => v == null ? '' : String(v).trim();
+const numeric = (v: unknown) => blank(v) || !Number.isFinite(Number(v)) ? null : Math.round(Number(v)*10000)/10000;
+export async function parseWorkbook(buffer: ArrayBuffer | Buffer, filename: string, selectedSheet?: string): Promise<ParsedImport> {
+  if (!filename.toLowerCase().endsWith('.xlsx')) throw new Error('Choose an .xlsx workbook.');
+  if (buffer.byteLength > 2 * 1024 * 1024) throw new Error('Lead workbooks must be smaller than 2 MB.');
+  const workbook = new ExcelJS.Workbook();
+  // Some valid XLSX producers prefix the spreadsheet namespace (the supplied
+  // workbooks use x:). ExcelJS expects unprefixed spreadsheet tags. Normalize
+  // only this namespace in a private in-memory copy; never modify the workbook.
+  const zip=await JSZip.loadAsync(buffer);
+  let expanded=0;
+  for (const entry of Object.values(zip.files)) {
+    expanded+=Number((entry as unknown as {_data?:{uncompressedSize:number}})._data?.uncompressedSize || 0);
+    if (expanded>30*1024*1024) throw new Error('This workbook expands beyond the import limit.');
+    // Charts and table presentation are irrelevant to research values; skip
+    // their producer-specific relationships rather than interpreting drawings.
+    if (/^xl\/(drawings|tables)\//.test(entry.name)) {zip.remove(entry.name);continue;}
+    if (!/^xl\/(workbook\.xml|styles\.xml|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/.test(entry.name)) continue;
+    let xml=await entry.async('string');
+    if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('Workbook XML declarations are not supported.');
+    const prefixes=[...xml.matchAll(/xmlns:([\w]+)=["']http:\/\/schemas\.openxmlformats\.org\/spreadsheetml\/2006\/main["']/g)].map(m=>m[1]);
+    for (const prefix of new Set(prefixes)) {
+      // Only element names change. Research text containing e.g. " x:note"
+      // must remain byte-for-byte intact after XML decoding.
+      xml=xml.replace(new RegExp(`(<\\/?)${prefix}:`,'g'),'$1');
+    }
+    if (entry.name.startsWith('xl/worksheets/')) xml=xml.replace(/<drawing\b[^>]*\/>/g,'').replace(/<tableParts\b[^>]*>[\s\S]*?<\/tableParts>/g,'');
+    zip.file(entry.name,xml);
+  }
+  const normalized=await zip.generateAsync({type:'nodebuffer'});
+  await workbook.xlsx.load(normalized as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  const sheets = workbook.worksheets.filter(s => s.getRow(1).values && Array.from(s.getRow(1).values as unknown[]).some(v=>text(v)==='Clinic / Practice')).map(s=>s.name);
+  const name=selectedSheet || (sheets.includes('Outreach Ready')?'Outreach Ready':sheets.find(s=>s==='Leads') || sheets[0]);
+  if (!name || !sheets.includes(name)) throw new Error('No supported clinic table found. The first row must contain Clinic / Practice.');
+  const sheet=workbook.getWorksheet(name)!;
+  const summary=workbook.getWorksheet('Summary');
+  let researchDate='';
+  summary?.eachRow(row=>{ if (text(cellValue(row.getCell(1).value))==='Research date') researchDate=text(cellValue(row.getCell(2).value)); });
+  const headers: Record<number,string>={};
+  sheet.getRow(1).eachCell((cell,col)=>{headers[col]=text(cellValue(cell.value));});
+  const rows: ImportedRow[]=[];
+  sheet.eachRow((row,index)=>{
+    if (index===1) return;
+    const raw: Record<string,string|number|null>={};
+    for (const [col,header] of Object.entries(headers)) raw[header]=cellValue(row.getCell(Number(col)).value);
+    if (!Object.values(raw).some(v=>!blank(v))) return;
+    const facts: LeadFacts={name:'',address:'',phone:'',email:'',socialNotes:'',socialUrls:[],rating:null,reviews:null,websiteStatus:'',seoPresence:'',aeoPresence:'',confidence:'',evidence:'',mapsUrl:'',verificationSource:'',score:null,priority:'',importedStage:'',notes:''};
+    for (const [header,key] of Object.entries(columns)) {
+      if (['rating','reviews','score'].includes(key)) (facts as unknown as Record<string,unknown>)[key]=numeric(raw[header]);
+      else (facts as unknown as Record<string,unknown>)[key]=text(raw[header]);
+    }
+    const social=text(raw['Social Media']);
+    const urls=social.split(/[\s,;]+/).filter(v=>safeHttps(v));
+    facts.socialUrls=urls; facts.socialNotes=urls.length?social.split(/[\s,;]+/).filter(v=>!safeHttps(v)).join(' '):social;
+    const issues=[];
+    if (!facts.name) issues.push('Missing clinic name');
+    if (facts.rating!=null && (facts.rating<0 || facts.rating>5)) issues.push('Rating must be between 0 and 5');
+    if (facts.reviews!=null && (facts.reviews<0 || !Number.isInteger(facts.reviews))) issues.push('Invalid review count');
+    rows.push({facts,provenance:{filename:filename.slice(0,180),sheet:name,row:index,researchDate,importedAt:new Date().toISOString(),raw},issues});
+  });
+  if (rows.length>2000) throw new Error('Import up to 2,000 prospects at a time.');
+  return {filename,sheet:name,sheets,columns:Object.values(headers),researchDate,rows};
+}
+export function previewImport(existing: Prospect[], parsed: ParsedImport): ImportEntry[] {
+  const rowKeys=parsed.rows.map(r=>identity(r.facts));
+  const fallbackKeys=parsed.rows.map(r=>`${norm(r.facts.name)}|${norm(r.facts.address)}`);
+  return parsed.rows.map((row,i)=>{
+    if (row.issues.length) return {row,kind:'invalid',changes:[],reason:row.issues.join(', ')};
+    const f=row.facts, pid=placeId(f.mapsUrl);
+    if (fallbackKeys.some((key,j)=>j!==i && key===fallbackKeys[i] && rowKeys[j]!==rowKeys[i])) return {row,kind:'ambiguous',changes:[],reason:'Same name/address has conflicting identities in this workbook.'};
+    if (rowKeys.indexOf(rowKeys[i])!==i || rowKeys.lastIndexOf(rowKeys[i])!==i) return {row,kind:'ambiguous',changes:[],reason:'Duplicate clinic identity in this workbook. Resolve before import.'};
+    let matches=pid?existing.filter(p=>placeId(p.source.mapsUrl)===pid):[];
+    if (!matches.length) {
+      matches=existing.filter(p=>norm(p.source.name)===norm(f.name) && norm(p.source.address)===norm(f.address));
+      if (pid && matches.some(p=>placeId(p.source.mapsUrl) && placeId(p.source.mapsUrl)!==pid)) return {row,kind:'ambiguous',changes:[],reason:'Same name/address but conflicting Google place IDs.'};
+    }
+    if (matches.length>1) return {row,kind:'ambiguous',changes:[],reason:'Multiple existing clinics match. Resolve before import.'};
+    if (!matches.length) return {row,kind:'new',changes:[]};
+    const match=matches[0];
+    const changes=Object.keys(f).filter(k=>!blank(f[k as keyof LeadFacts]) && JSON.stringify(f[k as keyof LeadFacts])!==JSON.stringify(match.source[k as keyof LeadFacts]));
+    return {row,kind:changes.length?'update':'unchanged',matchId:match.id,changes};
+  });
+}
+export function applyImport(existing: Prospect[], parsed: ParsedImport) {
+  const result=structuredClone(existing), entries=previewImport(result,parsed);
+  for (const entry of entries) {
+    if (entry.kind==='ambiguous' || entry.kind==='invalid') continue;
+    if (entry.matchId) {
+      const p=result.find(p=>p.id===entry.matchId)!;
+      for (const [key,value] of Object.entries(entry.row.facts)) if (!blank(value)) (p.source as unknown as Record<string,unknown>)[key]=value;
+      p.provenance=entry.row.provenance;
+    } else {
+      const f=entry.row.facts;
+      result.push({id:randomUUID(),source:f,provenance:entry.row.provenance,overrides:{},notes:f.notes,shortlisted:false,stage:STAGES.includes(f.importedStage as typeof STAGES[number])?f.importedStage as typeof STAGES[number]:'Not contacted',recheck:{status:'Not rechecked',url:'',checkedAt:''}});
+    }
+  }
+  return {prospects:result,entries};
+}
+export function scoreExplanation(f: LeadFacts) {
+  return {base:40,phone:f.phone?20:0,reviews:f.reviews==null?0:Math.min(f.reviews/50*20,20),rating:f.rating==null?0:f.rating>=4.5?20:f.rating>=4?10:0};
+}

@@ -1,0 +1,39 @@
+{
+  "name": "dental-preview-studio",
+  "version": "1.0.0",
+  "private": true,
+  "overrides": { "exceljs": { "uuid": "^11.1.1" } },
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "node scripts/prepare-fonts.mjs && next build",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "playwright test",
+    "fonts": "node scripts/prepare-fonts.mjs"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.3",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "lucide-react": "^1.55.0",
+    "next": "^16.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
