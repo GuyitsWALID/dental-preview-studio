@@ -32,6 +32,9 @@ export interface Release {
   id: string; projectId: string; createdAt: string; published: boolean;
   files: Record<string, { key: string; mime: string }>;
 }
-export interface Workspace { prospects: Prospect[]; projects: Project[]; assets: Asset[]; releases: Release[] }
+export interface Workspace {
+  prospects: Prospect[]; projects: Project[]; assets: Asset[]; releases: Release[];
+  outreachList?: {filename:string;sheet:string;importedAt:string;prospectIds:string[]};
+}
 export interface WorkspaceRecord { revision: number; state: Workspace }
 export const factsOf = (p: Prospect): LeadFacts => ({ ...p.source, ...p.overrides });

@@ -7,7 +7,7 @@ import { ownerId, HttpError } from './auth';
 import { putObject, getObject, removeObject, listObjects, readWorkspace, mutateWorkspace } from './store';
 
 const ttl=60*60*1000, pageSize=50;
-interface StagedImport {parsed:ParsedImport;entries:Omit<ImportEntry,'row'>[];revision:number;expiresAt:number}
+interface StagedImport {parsed:ParsedImport;entries:Omit<ImportEntry,'row'>[];outsideListCount:number;revision:number;expiresAt:number}
 function key(id:string) {
   if(!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(id)) throw new HttpError(400,'Invalid import reference.');
   return `${ownerId()}/imports/${id}.json`;
@@ -35,14 +35,16 @@ function page(id:string,stage:StagedImport,offset:number):ImportPayload {
       provenance:{...row.provenance,raw:{},links:undefined}}};
   });
   const {rows:_,...parsed}=stage.parsed;
-  return {importId:id,parsed,entries,counts,totalRows:stage.entries.length,offset,nextOffset:offset+pageSize<stage.entries.length?offset+pageSize:null,revision:stage.revision,expiresAt:stage.expiresAt};
+  return {importId:id,parsed,entries,counts,totalRows:stage.entries.length,outsideListCount:stage.outsideListCount,offset,nextOffset:offset+pageSize<stage.entries.length?offset+pageSize:null,revision:stage.revision,expiresAt:stage.expiresAt};
 }
 export async function stageImport(parsed:ParsedImport) {
   const prefix=`${ownerId()}/imports`;
   const expired=(await listObjects(prefix)).filter(f=>Date.parse(f.createdAt)+ttl<=Date.now());
   await Promise.all(expired.map(f=>removeObject(f.key)));
   const {state,revision}=await readWorkspace(),id=randomUUID();
-  const stage:StagedImport={parsed,entries:previewImport(state.prospects,parsed).map(({row:_,...entry})=>entry),revision,expiresAt:Date.now()+ttl};
+  const entries=previewImport(state.prospects,parsed).map(({row:_,...entry})=>entry);
+  const included=new Set(entries.filter(e=>e.kind==='update' || e.kind==='unchanged').map(e=>e.matchId));
+  const stage:StagedImport={parsed,entries,outsideListCount:state.prospects.filter(p=>!included.has(p.id)).length,revision,expiresAt:Date.now()+ttl};
   // text/plain is already allowed in the private bucket. Compression keeps
   // a supported 2,000-row import below the bucket's 5 MB object limit.
   const body=JSON.stringify({encoding:'gzip-base64',data:gzipSync(JSON.stringify(stage)).toString('base64')});
@@ -52,13 +54,17 @@ export async function stageImport(parsed:ParsedImport) {
 }
 export async function importPage(id:string,offset:number) {return page(id,await readStage(id),offset);}
 export async function cancelImport(id:string) {await removeObject(key(id));}
-export async function confirmImport(id:string,revision:number,acceptSkipped:boolean) {
+export async function confirmImport(id:string,revision:number,acceptSkipped:boolean,useAsCurrentList=false) {
   const stage=await readStage(id);
   if(revision!==stage.revision) throw new HttpError(409,'Import revision does not match. Choose the workbook again.');
   const result=await mutateWorkspace(state=>{
     const entries=previewImport(state.prospects,stage.parsed);
     if(entries.some(e=>e.kind==='ambiguous' || e.kind==='invalid') && !acceptSkipped) throw new HttpError(400,'Review and acknowledge the rows that cannot be imported.');
-    state.prospects=applyImport(state.prospects,stage.parsed).prospects;
+    const imported=applyImport(state.prospects,stage.parsed);
+    const prospectIds=imported.entries.filter(e=>e.kind==='new' || e.kind==='update' || e.kind==='unchanged').map(e=>e.matchId!);
+    if(useAsCurrentList && !prospectIds.length)throw new HttpError(400,'A current outreach list must contain at least one valid prospect.');
+    state.prospects=imported.prospects;
+    if(useAsCurrentList)state.outreachList={filename:stage.parsed.filename,sheet:stage.parsed.sheet,importedAt:new Date().toISOString(),prospectIds};
     return {imported:entries.filter(e=>e.kind==='new' || e.kind==='update').length};
   },stage.revision);
   // A cleanup failure must not report that a committed import failed. Replays

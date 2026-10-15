@@ -6,6 +6,27 @@ import { parseWorkbook, applyImport, previewImport } from '../lib/prospects';
 import { initialWorkspace } from '../lib/seed';
 import { createClinicConfig, renderClinicSite, validateSiteConfig } from '../lib/site/renderer.mjs';
 
+test('website-checked workbook imports its current outreach set, retains history and surfaces real enrichment conflicts',async t=>{
+  let bytes:Buffer,previous:Buffer;
+  try {bytes=await readFile('C:/Users/walid/Downloads/addis_ababa_dental_no_website_checked.xlsx');previous=await readFile('C:/Users/walid/Downloads/addis_ababa_dental_outreach_ready (1).xlsx');}
+  catch{t.skip('Local checked workbooks unavailable.');return;}
+  const parsed=await parseWorkbook(bytes,'checked.xlsx');
+  assert.equal(parsed.sheet,'Outreach Ready');assert.equal(parsed.rows.length,28);assert.equal(parsed.rows.filter(r=>r.facts.priority==='High').length,7);
+  assert.deepEqual(parsed.enrichment,{clinics:28,reviews:26,assets:6});assert.equal(parsed.enrichmentWarnings?.length,6);
+  assert.ok(parsed.rows.every(r=>r.facts.websiteStatus.includes('No owned website found')));
+  assert.equal((await parseWorkbook(bytes,'checked.xlsx','Leads')).rows.length,34);
+  const workspace=initialWorkspace();workspace.prospects=applyImport(workspace.prospects,await parseWorkbook(previous,'previous.xlsx')).prospects;
+  const oli=workspace.prospects.find(p=>p.stage==='Proposal requested')!;oli.notes='Keep this conversation';oli.shortlisted=true;oli.overrides={name:'Owner-approved OLI'};
+  const before=structuredClone(workspace.prospects),projects=JSON.stringify(workspace.projects),imported=applyImport(before,parsed);
+  assert.equal(imported.prospects.length,49);assert.ok(imported.entries.every(e=>e.kind==='update' && e.matchId));
+  const currentIds=new Set(imported.entries.map(e=>e.matchId));assert.equal(currentIds.size,28);
+  const outside=imported.prospects.filter(p=>!currentIds.has(p.id));assert.equal(outside.length,21);
+  for(const p of outside)assert.deepEqual(p,before.find(old=>old.id===p.id));
+  const saved=imported.prospects.find(p=>p.id===oli.id)!;assert.equal(saved.stage,'Proposal requested');assert.equal(saved.notes,oli.notes);assert.equal(saved.shortlisted,true);assert.deepEqual(saved.overrides,oli.overrides);
+  assert.equal(JSON.stringify(workspace.projects),projects);assert.ok(previewImport(imported.prospects,parsed).every(e=>e.kind==='unchanged'));
+  const fresh=applyImport([],parsed);assert.equal(fresh.prospects.length,28);assert.ok(fresh.entries.every(e=>fresh.prospects.some(p=>p.id===e.matchId)));
+});
+
 test('upgraded workbook links 49 clinics and 27 paraphrases without inventing OLI reviews or leaking between clinics',async t=>{
   let bytes:Buffer;try {bytes=await readFile('C:/Users/walid/Downloads/addis_ababa_dental_outreach_ready (1).xlsx');}catch{t.skip('Upgraded local workbook unavailable.');return;}
   const parsed=await parseWorkbook(bytes,'upgraded.xlsx');assert.equal(parsed.rows.length,49);assert.equal(parsed.enrichment?.clinics,49);assert.equal(parsed.enrichment?.reviews,27);assert.equal(parsed.enrichmentWarnings,undefined);
@@ -26,6 +47,9 @@ test('enrichment rejects cross-clinic IDs and ambiguous matches, and reads cache
   reviews.addRow(['DENT-001','Clinic B','Wrong branch','Do not attach','https://example.test',5]);reviews.addRow(['DENT-002','Clinic B','Correct reviewer',{formula:'DONT_EXECUTE()',result:'A cached summary'},'https://example.test',4]);
   const parsed=await parseWorkbook(Buffer.from(await wb.xlsx.writeBuffer()),'mixed.xlsx');assert.equal(parsed.rows[0].research!.reviews.length,0);assert.equal(parsed.rows[1].research!.reviews[0].text,'A cached summary');assert.equal(parsed.enrichmentWarnings?.length,1);
   leads.addRow(['Clinic A','Another location','https://google.com/maps?query_place_id=clinic-a']);const ambiguous=await parseWorkbook(Buffer.from(await wb.xlsx.writeBuffer()),'ambiguous.xlsx');assert.ok(!ambiguous.rows[0].research);assert.ok(ambiguous.enrichmentWarnings!.length>=1);
+  leads.spliceRows(2,1);leads.spliceRows(3,1);
+  const filtered=await parseWorkbook(Buffer.from(await wb.xlsx.writeBuffer()),'filtered.xlsx');
+  assert.equal(filtered.rows.length,1);assert.equal(filtered.enrichmentWarnings?.length,1);assert.ok(filtered.enrichmentWarnings![0].startsWith('Reviews row 2:'));
 });
 test('review summaries retain attribution and actual stars in HTML, with backwards-compatible public config',()=>{
   const c=createClinicConfig({name:'Review clinic'});c.reviews=[{quote:'A supplied paraphrase <script>bad()</script>',author:'Reviewer',sourceUrl:'https://example.test/reviews',checkedAt:'2026-10-11',kind:'summary',rating:1,dateLabel:'2 years ago',platform:'Mirrored Google review',snapshotContext:'Older snapshot',attribution:'Paraphrased'}];

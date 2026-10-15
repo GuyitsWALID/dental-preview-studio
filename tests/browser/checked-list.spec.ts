@@ -1,0 +1,42 @@
+import { test, expect } from './fixtures';
+import { readFile } from 'node:fs/promises';
+
+test('checked workbook becomes the current list while history, manual edits, reviews and projects survive',async({page,request})=>{
+  const headers={Origin:process.env.STUDIO_TEST_ORIGIN!};
+  const upload=async(file:string)=>{
+    const response=await request.post('/api/import',{headers,multipart:{file:{name:file,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await readFile('C:/Users/walid/Downloads/'+file)}}});
+    expect(response.status(),await response.text()).toBe(200);return response.json();
+  };
+  const original=await upload('addis_ababa_dental_outreach_ready (1).xlsx');
+  expect((await request.post('/api/studio',{headers,data:{action:'confirmImport',importId:original.importId,revision:original.revision}})).status()).toBe(200);
+  let workspace=await (await request.get('/api/studio')).json();
+  const mina=workspace.state.prospects.find((p:any)=>p.source.name==='Mina Dent Special Dental Clinic');
+  expect((await request.post('/api/studio',{headers,data:{action:'updateProspect',id:mina.id,notes:'Keep this history note',shortlisted:true,stage:'Contacted',revision:workspace.revision}})).status()).toBe(200);
+  const before=await (await request.get('/api/studio')).json();
+  await page.goto('/');await page.getByRole('button',{name:'Import spreadsheet'}).click();
+  await page.locator('input[type=file]').setInputFiles('C:/Users/walid/Downloads/addis_ababa_dental_no_website_checked.xlsx');
+  await expect(page.getByText('Enriched research: 28 clinics, 26 review records', {exact:false})).toBeVisible();
+  await expect(page.getByText('Some enrichment records could not be linked:',{exact:false})).toBeVisible();
+  await page.getByLabel('Use this worksheet as the current outreach list').check();
+  await expect(page.getByText('28 valid prospects will be in the current list. 21 existing prospects will remain in history, with their notes and projects.',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Confirm import'}).click();await expect(page.getByText('28 of 28 prospects')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Open Mina Dent Special Dental Clinic',exact:true})).toHaveCount(0);
+  await page.getByLabel('Prospect list').selectOption('history');await expect(page.getByText('21 of 21 historical prospects')).toBeVisible();
+  await page.getByRole('button',{name:'Open Mina Dent Special Dental Clinic',exact:true}).click();
+  await expect(page.getByLabel('Your notes')).toHaveValue('Keep this history note');await expect(page.getByRole('dialog').getByRole('combobox').first()).toHaveValue('Contacted');await page.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByLabel('Prospect list').selectOption('current');await page.getByRole('button',{name:'Open Oli Dental Clinic',exact:true}).click();
+  await expect(page.getByRole('dialog').getByRole('combobox').first()).toHaveValue('Proposal requested');await page.getByRole('button',{name:'Close dialog'}).click();
+  await page.reload();await expect(page.getByText('28 of 28 prospects')).toBeVisible();
+  const after=await (await request.get('/api/studio')).json();expect(after.state.prospects).toHaveLength(49);expect(after.state.outreachList.prospectIds).toHaveLength(28);expect(after.state.projects).toEqual(before.state.projects);
+  const beforeReviewIds=new Set(before.state.prospects.flatMap((p:any)=>p.research?.reviews?.map((review:any)=>review.id) || []));
+  const afterReviewIds=new Set(after.state.prospects.flatMap((p:any)=>p.research?.reviews?.map((review:any)=>review.id) || []));
+  expect(afterReviewIds.size).toBeGreaterThanOrEqual(beforeReviewIds.size);for(const id of beforeReviewIds)expect(afterReviewIds).toContain(id);
+  const again=await upload('addis_ababa_dental_outreach_ready (1).xlsx');
+  expect((await request.post('/api/studio',{headers,data:{action:'confirmImport',importId:again.importId,revision:again.revision}})).status()).toBe(200);
+  expect((await (await request.get('/api/studio')).json()).state.outreachList).toEqual(after.state.outreachList);
+  await page.setViewportSize({width:390,height:844});await page.reload();await expect(page.getByText('28 of 28 prospects')).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  const restore=await upload('addis_ababa_dental_outreach_ready (1).xlsx');
+  expect((await request.post('/api/studio',{headers,data:{action:'confirmImport',importId:restore.importId,revision:restore.revision,useAsCurrentList:true}})).status()).toBe(200);
+  await page.reload();await expect(page.getByText('49 of 49 prospects')).toBeVisible();await expect(page.getByRole('option',{name:'History (0)',exact:true})).toHaveCount(1);
+});

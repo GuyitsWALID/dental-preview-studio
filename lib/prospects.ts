@@ -54,15 +54,19 @@ function researchTable(workbook:ExcelJS.Workbook,sheetName:string,filename:strin
 }
 function enrichRows(workbook:ExcelJS.Workbook,rows:ImportedRow[],filename:string) {
   const details=researchTable(workbook,'Clinic Details',filename),reviews=researchTable(workbook,'Reviews',filename),assets=researchTable(workbook,'Assets',filename),warnings:string[]=[];
-  const linked=new Map<string,ImportedRow>();
+  const linked=new Map<string,ImportedRow>(),outsideSelection=new Map<string,string>();
   for(const detail of details) {
     const v=detail.values,id=text(v['Clinic ID']),pid=placeId(text(v['Original Google Maps'])),name=norm(text(v['Clinic / Practice']));
     const matches=rows.filter(r=>pid?placeId(r.facts.mapsUrl)===pid:norm(r.facts.name)===name);
-    if(details.filter(d=>text(d.values['Clinic ID'])===id).length!==1 || matches.length!==1 || matches[0].research) {warnings.push(`Clinic Details row ${detail.provenance.row}: identity is missing or ambiguous; enrichment was not attached.`);continue;}
+    if(!id || details.filter(d=>text(d.values['Clinic ID'])===id).length!==1) {warnings.push(`Clinic Details row ${detail.provenance.row}: identity is missing or ambiguous; enrichment was not attached.`);continue;}
+    // Filtered outreach sheets can retain research for clinics outside the selected table.
+    if(!matches.length) {outsideSelection.set(id,name);continue;}
+    if(matches.length!==1 || matches[0].research) {warnings.push(`Clinic Details row ${detail.provenance.row}: identity is missing or ambiguous; enrichment was not attached.`);continue;}
     const row=matches[0];row.research={clinicId:id,details:detail,reviews:[],assets:[]};linked.set(id,row);
   }
   for(const record of reviews) {
     const v=record.values,row=linked.get(text(v['Clinic ID']));
+    if(!row && outsideSelection.get(text(v['Clinic ID']))===norm(text(v['Clinic / Practice'])))continue;
     if(!row || norm(text(v['Clinic / Practice']))!==norm(text(row.research!.details.values['Clinic / Practice']))) {warnings.push(`Reviews row ${record.provenance.row}: clinic identity does not match; review was not attached.`);continue;}
     const quote=text(v['Review text — verbatim'] || v['Review text']),summary=text(v['Review summary — paraphrased']),body=quote || summary;
     if(!body)continue;
@@ -76,6 +80,7 @@ function enrichRows(workbook:ExcelJS.Workbook,rows:ImportedRow[],filename:string
   }
   for(const record of assets) {
     const row=linked.get(text(record.values['Clinic ID']));
+    if(!row && outsideSelection.get(text(record.values['Clinic ID']))===norm(text(record.values['Clinic / Practice'])))continue;
     if(!row || norm(text(record.values['Clinic / Practice']))!==norm(text(row.research!.details.values['Clinic / Practice']))) {warnings.push(`Assets row ${record.provenance.row}: clinic identity does not match; asset was not attached.`);continue;}
     row.research!.assets.push(record);
   }
@@ -123,7 +128,10 @@ export async function parseWorkbook(buffer: ArrayBuffer | Buffer, filename: stri
     zip.file(entry.name,xml);
   }
   const normalized=await zip.generateAsync({type:'nodebuffer'});
-  await workbook.xlsx.load(normalized as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  // Merge ranges are visual formatting and are not part of prospect data. Some
+  // research exports contain overlapping ranges that Excel tolerates but
+  // ExcelJS rejects, so ignore them while retaining every underlying cell.
+  await workbook.xlsx.load(normalized as unknown as Parameters<typeof workbook.xlsx.load>[0],{ignoreNodes:['mergeCells']});
   const sheets = workbook.worksheets.filter(s => s.getRow(1).values && Array.from(s.getRow(1).values as unknown[]).some(v=>text(v)==='Clinic / Practice')).map(s=>s.name);
   const name=selectedSheet || (sheets.includes('Outreach Ready')?'Outreach Ready':sheets.find(s=>s==='Leads') || sheets[0]);
   if (!name || !sheets.includes(name)) throw new Error('No supported clinic table found. The first row must contain Clinic / Practice.');
@@ -194,7 +202,8 @@ export function applyImport(existing: Prospect[], parsed: ParsedImport) {
       if(entry.row.research)p.research=mergeResearch(p.research,entry.row.research);
     } else {
       const f=entry.row.facts;
-      result.push({id:randomUUID(),source:f,provenance:entry.row.provenance,overrides:{},notes:f.notes,shortlisted:false,stage:STAGES.includes(f.importedStage as typeof STAGES[number])?f.importedStage as typeof STAGES[number]:'Not contacted',recheck:{status:'Not rechecked',url:'',checkedAt:''},...(entry.row.research?{research:entry.row.research}:{})});
+      entry.matchId=randomUUID();
+      result.push({id:entry.matchId,source:f,provenance:entry.row.provenance,overrides:{},notes:f.notes,shortlisted:false,stage:STAGES.includes(f.importedStage as typeof STAGES[number])?f.importedStage as typeof STAGES[number]:'Not contacted',recheck:{status:'Not rechecked',url:'',checkedAt:''},...(entry.row.research?{research:entry.row.research}:{})});
     }
   }
   return {prospects:result,entries};

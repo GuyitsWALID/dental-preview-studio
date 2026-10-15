@@ -54,6 +54,28 @@ test('rendered clinic sites isolate content, validate shape and escape HTML/sche
   const bad=structuredClone(fresh) as unknown as Record<string,unknown>;bad.privateNotes='private';assert.ok(validateSiteConfig(bad as never).length);
   const url=createClinicConfig();url.socials=[{label:'Bad',url:'javascript:alert(1)'}];assert.ok(validateSiteConfig(url).length);url.socials=[];url.logo={path:'../escape.svg',alt:'bad',width:10,height:10};assert.ok(validateSiteConfig(url).length);
 });
+test('design controls render consistently and legacy version-one configs remain valid',()=>{
+  const legacy=createClinicConfig({name:'Legacy Dental'});delete legacy.appearance;delete legacy.sectionOrder;
+  assert.deepEqual(validateSiteConfig(legacy),[]);
+  assert.ok(renderClinicSite(legacy,{mode:'draft'})['index.html'].includes('class="hero-split density-comfortable cards-outlined"'));
+
+  const clinic=createClinicConfig({name:'Atlas Dental'});
+  clinic.appearance={heroLayout:'centered',density:'compact',corners:'rounded',cards:'elevated'};
+  clinic.sectionOrder=['contact','about','services','reviews','faq'];
+  clinic.about.body='About Atlas';
+  clinic.services=[{id:'cleaning',title:'Cleaning',summary:'A clear summary',body:'Full details',dedicatedPage:false,seoTitle:'',seoDescription:'',faqs:[]}];
+  clinic.reviews=[{quote:'A helpful visit',author:'Google reviewer',sourceUrl:'https://www.google.com/maps',checkedAt:'2026-10-15'}];
+  clinic.faqs=[{question:'How do I book?',answer:'Contact the clinic.'}];
+  const html=renderClinicSite(clinic,{mode:'draft'})['index.html'];
+  assert.ok(html.includes('class="hero-centered density-compact cards-elevated"'));
+  assert.ok(html.includes('--radius:22px'));
+  assert.ok(html.indexOf('id="visit"')<html.indexOf('id="about"'));
+  assert.ok(html.indexOf('id="about"')<html.indexOf('id="care"'));
+  assert.ok(html.indexOf('id="care"')<html.indexOf('id="reviews"'));
+
+  clinic.sectionOrder=['contact','contact','services','reviews','faq'];
+  assert.ok(validateSiteConfig(clinic).length);
+});
 test('production canonicals, sitemap and schema use the final domain; preview stays noindex',()=>{
   const c=createClinicConfig({name:'Cedar Dental',address:'Bole',phone:'+251911234567'});assert.ok(productionIssues(c).length);
   c.seo.siteUrl='https://cedar.example';c.form.whatsappNumber='+251911234567';c.form.whatsappConfirmed=true;c.pages={mode:'multipage',contact:true};c.services=[{id:'cleaning',title:'Dental cleaning',summary:'Clinic-approved summary',body:'Clinic-approved description',dedicatedPage:true,seoTitle:'Cleaning at Cedar',seoDescription:'A distinct description',faqs:[]}];

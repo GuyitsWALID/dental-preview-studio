@@ -9,6 +9,7 @@ export interface SiteService {
   id: string; title: string; summary: string; body: string; dedicatedPage: boolean;
   seoTitle: string; seoDescription: string; faqs: SiteFAQ[];
 }
+export type SiteSection = 'services' | 'reviews' | 'about' | 'faq' | 'contact';
 export interface ClinicSiteConfig {
   version: 1;
   name: string; tagline: string;
@@ -28,6 +29,8 @@ export interface ClinicSiteConfig {
   pages: { mode: 'landing' | 'multipage'; contact: boolean };
   seo: { title: string; description: string; siteUrl: string };
   form: { mode: 'email' | 'whatsapp'; formspreeId: string; whatsappNumber: string; whatsappConfirmed: boolean };
+  appearance?: { heroLayout:'split'|'centered'; density:'compact'|'comfortable'; corners:'square'|'soft'|'rounded'; cards:'outlined'|'elevated' };
+  sectionOrder?: SiteSection[];
 }
 export interface RenderOptions { mode: 'preview' | 'draft' | 'production'; basePath?: string; assetUrls?: Record<string, string> }
 export type FileManifest = Record<string, string>;

@@ -6,10 +6,12 @@ import { publishProject, prepareExport, saveImage, useOliCover, configHash } fro
 import { confirmImport } from '@/lib/server/imports';
 import { createClinicConfig, slugify, validateSiteConfig, productionIssues, safeHttps } from '@/lib/site/renderer.mjs';
 import type { ClinicSiteConfig } from '@/lib/site/types';
-import { STAGES, factsOf, type LeadFacts, type Project } from '@/lib/types';
+import { STAGES, factsOf, type LeadFacts, type Prospect, type Project } from '@/lib/types';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const fail = (error:unknown) => NextResponse.json({error:error instanceof Error?error.message:'The action could not be completed.'},{status:error instanceof HttpError?error.status:400});
+const normalizedLeadKey=(name:string,address:string)=>`${name.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ')}|${address.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ')}`;
+const mapsPlaceId=(url:string)=>{try{const parsed=new URL(url);return parsed.searchParams.get('query_place_id') || parsed.searchParams.get('place_id') || '';}catch{return '';}};
 export async function GET() {
   try {
     await requireOwner();
@@ -29,7 +31,7 @@ export async function POST(request:Request) {
     await requireOwner(); assertSameOrigin(request);
     if (Number(request.headers.get('content-length'))>2*1024*1024) throw new HttpError(413,'This request is too large.');
     const body=await request.json(), action=body.action;
-    if (action==='confirmImport') return NextResponse.json(await confirmImport(String(body.importId || ''),body.revision,body.acceptSkipped===true),{headers:{'Cache-Control':'private, no-store'}});
+    if (action==='confirmImport') return NextResponse.json(await confirmImport(String(body.importId || ''),body.revision,body.acceptSkipped===true,body.useAsCurrentList===true),{headers:{'Cache-Control':'private, no-store'}});
     if (action==='publish') {return NextResponse.json({url:await publishProject(body.projectId)});}
     if (action==='export') {
       const {state}=await readWorkspace(), project=state.projects.find(p=>p.id===body.projectId);
@@ -79,7 +81,33 @@ export async function POST(request:Request) {
         }
         return {id:p.id};
       }
-      if (action==='createProject') {
+      if (action==='addMapsProspect') {
+        const incoming=body.facts;
+        if(!incoming || typeof incoming!=='object')throw new HttpError(400,'Enter the clinic details.');
+        const value=(key:string,max=3000)=>typeof incoming[key]==='string'?incoming[key].trim().slice(0,max):'';
+        const name=value('name',300),address=value('address'),phone=value('phone',40),email=value('email',320),mapsUrl=value('mapsUrl'),evidence=value('evidence',10000);
+        const rating=incoming.rating==null?null:Number(incoming.rating),reviews=incoming.reviews==null?null:Number(incoming.reviews);
+        if(!name)throw new HttpError(400,'Clinic name is required.');
+        const mapsHosts=['www.google.com','google.com','maps.google.com','maps.app.goo.gl','goo.gl'];
+        if(!safeHttps(mapsUrl,mapsHosts))throw new HttpError(400,'Use a valid HTTPS Google Maps place URL.');
+        if(phone && !/^\+[1-9][0-9 ()-]{6,24}$/.test(phone))throw new HttpError(400,'Use an international phone number beginning with +.');
+        if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new HttpError(400,'Enter a valid email address.');
+        if(rating!==null && (!Number.isFinite(rating) || rating<0 || rating>5))throw new HttpError(400,'Rating must be between 0 and 5.');
+        if(reviews!==null && (!Number.isInteger(reviews) || reviews<0))throw new HttpError(400,'Review count must be a nonnegative whole number.');
+        const placeId=mapsPlaceId(mapsUrl),fallback=normalizedLeadKey(name,address);
+        const placeMatches=placeId?state.prospects.filter(p=>mapsPlaceId(p.source.mapsUrl)===placeId):[];
+        const fallbackMatches=state.prospects.filter(p=>normalizedLeadKey(p.source.name,p.source.address)===fallback);
+        if(placeMatches.length>1 || fallbackMatches.length>1)throw new HttpError(409,'Multiple prospects match this clinic. Review the existing records before adding it.');
+        if(placeId && fallbackMatches[0] && mapsPlaceId(fallbackMatches[0].source.mapsUrl) && mapsPlaceId(fallbackMatches[0].source.mapsUrl)!==placeId)throw new HttpError(409,'The clinic name and address match a different Google Maps place ID. Review the existing record.');
+        const existing=placeMatches[0] || fallbackMatches[0];
+        if(existing){if(state.outreachList && !state.outreachList.prospectIds.includes(existing.id))state.outreachList.prospectIds.push(existing.id);return {id:existing.id,kind:'existing' as const};}
+        const now=new Date().toISOString(),id=randomUUID();
+        const source:LeadFacts={name,address,phone,email,socialNotes:'',socialUrls:[],rating,reviews,websiteStatus:'No owned website found — verify before outreach',seoPresence:'',aeoPresence:'',confidence:'Medium',evidence:evidence || 'Added manually from a Google Maps listing.',mapsUrl,verificationSource:mapsUrl,score:null,priority:'',importedStage:'',notes:''};
+        const prospect:Prospect={id,source,provenance:{filename:'Manual Google Maps entry',sheet:'Quick add',row:0,researchDate:now.slice(0,10),importedAt:now,raw:{}},overrides:{},notes:'',stage:'Not contacted',shortlisted:false,recheck:{status:'Not rechecked',url:'',checkedAt:''}};
+        state.prospects.push(prospect);state.outreachList?.prospectIds.push(id);
+        return {id,kind:'new' as const};
+      }
+    if (action==='createProject') {
         const p=state.prospects.find(p=>p.id===body.prospectId);if(!p)throw new HttpError(404,'Prospect not found.');
         const existing=state.projects.find(p=>p.prospectId===body.prospectId);if(existing)return {id:existing.id};
         const f=factsOf(p),config=createClinicConfig({name:f.name,address:f.address,phone:f.phone,mapsUrl:f.mapsUrl,rating:f.rating,reviews:f.reviews,checkedAt:p.provenance.researchDate});
