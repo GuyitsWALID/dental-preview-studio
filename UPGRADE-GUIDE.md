@@ -4,6 +4,8 @@ Goal: walk into a dental-clinic pitch and show a **tailored, working clinic site
 
 The app already does most of this. Read this before changing anything so you do not rebuild what exists.
 
+> **Status: upgrades 1–4 implemented.** Presets, optional Maps URL, one-click save-and-publish and URL image import are in, with unit + browser tests updated. The pitch-day runbook below is the live flow.
+
 ## What already works (do not rebuild)
 
 - **One-click create**: Prospect view → *From Google Maps* → fill facts → **Add and build** creates the prospect + project and opens the editor. `components/QuickAddDialog.tsx:38`, `components/Studio.tsx:25`, `app/api/studio/route.ts:84,110`.
@@ -16,7 +18,7 @@ The single real gap: **a brand-new project looks empty.** `createClinicConfig` (
 
 ## Upgrades, in payoff order
 
-### 1. Preset library (highest payoff, no dependencies) — DO THIS FIRST
+### 1. Preset library (highest payoff, no dependencies) — done
 
 Give every new project a plausible theme, 4–6 services and 2–3 FAQs before the owner types anything. Static data, no AI, no network.
 
@@ -30,7 +32,7 @@ Why it exists: it converts "empty template" into "looks like their clinic" with 
 // owners actually ask for bespoke copy during a pitch.
 ```
 
-### 2. Quick add with only a clinic name (smallest diff)
+### 2. Quick add with only a clinic name (smallest diff) — done
 
 Today `mapsUrl` is required (`app/api/studio/route.ts:92`) and the Add buttons stay disabled without it (`components/QuickAddDialog.tsx:38`). For a cold pitch you often have just a name.
 
@@ -38,11 +40,11 @@ Today `mapsUrl` is required (`app/api/studio/route.ts:92`) and the Add buttons s
 - Drop `|| !facts.mapsUrl.trim()` from the disabled checks.
 - The renderer already degrades without a map (`lib/site/renderer.mjs:121` map placeholder).
 
-### 3. One-click "Save & publish" (minor, removes a click)
+### 3. One-click "Save & publish" (minor, removes a click) — done
 
 Publish is blocked while the draft is dirty (`components/Editor.tsx:47`). Chain it: make the publish handler `await save()` then publish so a pitch never shows "save first".
 
-### 4. Import a logo/cover from a URL (visuals fast)
+### 4. Import a logo/cover from a URL (visuals fast) — done
 
 `saveImage` (`lib/server/projects.ts:11`) already validates signature, re-encodes to WebP at 1600px and stores it. Add a tiny server action that `fetch()`es an HTTPS image and passes the bytes to `saveImage`. Use the clinic's existing logo or social image instead of asking them to upload during a pitch.
 ```js

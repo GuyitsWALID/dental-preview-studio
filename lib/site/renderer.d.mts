@@ -1,5 +1,6 @@
 import type { ClinicSiteConfig, FileManifest, RenderOptions } from './types';
-export function createClinicConfig(input?: {name?: string; address?: string; phone?: string; mapsUrl?: string; rating?: number | null; reviews?: number | null; checkedAt?: string}): ClinicSiteConfig;
+export const PRESETS: Record<string, { label: string; theme: ClinicSiteConfig['theme']; services: [string, string][]; faqs: { question: string; answer: string }[] }>;
+export function createClinicConfig(input?: {name?: string; address?: string; phone?: string; mapsUrl?: string; rating?: number | null; reviews?: number | null; checkedAt?: string; preset?: string}): ClinicSiteConfig;
 export function validateSiteConfig(config: ClinicSiteConfig): string[];
 export function serializeSiteConfig(config: ClinicSiteConfig): string;
 export function productionIssues(config: ClinicSiteConfig): string[];

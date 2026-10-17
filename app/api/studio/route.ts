@@ -55,6 +55,15 @@ export async function POST(request:Request) {
       finally {await removeObject(key);}
     }
     if (action==='oliCover') return NextResponse.json({asset:await useOliCover(body.projectId)});
+    if (action==='importImageUrl') {
+      const raw=String(body.url || '');
+      let host='';try {host=new URL(raw).hostname;} catch {}
+      if (!safeHttps(raw) || !host || host==='localhost' || host.endsWith('.local') || host.endsWith('.internal') || /^[\d.:]+$/.test(host)) throw new HttpError(400,'Enter a public HTTPS image URL.');
+      let response:Response;
+      try {response=await fetch(raw,{redirect:'follow'});} catch {throw new HttpError(400,'The image could not be downloaded.');}
+      if (!response.ok) throw new HttpError(400,'The image could not be downloaded.');
+      return NextResponse.json({asset:await saveImage(Buffer.from(await response.arrayBuffer()))});
+    }
     const result=await mutateWorkspace(state=>{
       if (action==='updateProspect') {
         const p=state.prospects.find(p=>p.id===body.id);if(!p)throw new HttpError(404,'Prospect not found.');
@@ -89,7 +98,7 @@ export async function POST(request:Request) {
         const rating=incoming.rating==null?null:Number(incoming.rating),reviews=incoming.reviews==null?null:Number(incoming.reviews);
         if(!name)throw new HttpError(400,'Clinic name is required.');
         const mapsHosts=['www.google.com','google.com','maps.google.com','maps.app.goo.gl','goo.gl'];
-        if(!safeHttps(mapsUrl,mapsHosts))throw new HttpError(400,'Use a valid HTTPS Google Maps place URL.');
+        if(mapsUrl && !safeHttps(mapsUrl,mapsHosts))throw new HttpError(400,'Use a valid HTTPS Google Maps place URL.');
         if(phone && !/^\+[1-9][0-9 ()-]{6,24}$/.test(phone))throw new HttpError(400,'Use an international phone number beginning with +.');
         if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new HttpError(400,'Enter a valid email address.');
         if(rating!==null && (!Number.isFinite(rating) || rating<0 || rating>5))throw new HttpError(400,'Rating must be between 0 and 5.');
@@ -110,7 +119,7 @@ export async function POST(request:Request) {
     if (action==='createProject') {
         const p=state.prospects.find(p=>p.id===body.prospectId);if(!p)throw new HttpError(404,'Prospect not found.');
         const existing=state.projects.find(p=>p.prospectId===body.prospectId);if(existing)return {id:existing.id};
-        const f=factsOf(p),config=createClinicConfig({name:f.name,address:f.address,phone:f.phone,mapsUrl:f.mapsUrl,rating:f.rating,reviews:f.reviews,checkedAt:p.provenance.researchDate});
+        const f=factsOf(p),config=createClinicConfig({name:f.name,address:f.address,phone:f.phone,mapsUrl:f.mapsUrl,rating:f.rating,reviews:f.reviews,checkedAt:p.provenance.researchDate,preset:typeof body.preset==='string'?body.preset:undefined});
         const stem=slugify(f.name);let slug=stem,n=2;while(state.projects.some(p=>p.slug===slug))slug=`${stem}-${n++}`;
         const project:Project={id:randomUUID(),prospectId:p.id,slug,config,updatedAt:new Date().toISOString(),publishedReleaseId:null,publishedConfigHash:null};
         state.projects.push(project);return {id:project.id};

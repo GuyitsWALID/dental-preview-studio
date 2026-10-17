@@ -8,6 +8,7 @@ export async function readResponse<T>(response:Response):Promise<T> {
 }
 export const studioAction = <T=Record<string,unknown>>(body:Record<string,unknown>) => fetch('/api/studio',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(readResponse<T>);
 export const refreshWorkspace = () => fetch('/api/studio',{cache:'no-store'}).then(readResponse<WorkspaceRecord>);
+export const importImageUrl = async (url:string):Promise<Asset> => (await studioAction<{asset:Asset}>({action:'importImageUrl',url})).asset;
 export async function uploadImage(file:File,local:boolean):Promise<Asset> {
   if(file.size>5*1024*1024)throw new Error('Choose an image up to 5 MB.');
   if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('Choose a JPEG, PNG, or WebP image.');

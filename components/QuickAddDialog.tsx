@@ -2,10 +2,12 @@
 import { useState } from 'react';
 import { ArrowRight, MapPin } from 'lucide-react';
 import { Field, Modal } from './ui';
+import { PRESETS } from '@/lib/site/renderer.mjs';
 import type { LeadFacts } from '@/lib/types';
 
 export interface QuickAddData {
   facts: LeadFacts;
+  preset?: string;
 }
 
 interface Props {
@@ -18,9 +20,9 @@ interface Props {
 const blankFacts=():LeadFacts=>({name:'',address:'',phone:'',email:'',socialNotes:'',socialUrls:[],rating:null,reviews:null,websiteStatus:'No owned website found — verify before outreach',seoPresence:'',aeoPresence:'',confidence:'Medium',evidence:'Added manually from a Google Maps listing.',mapsUrl:'',verificationSource:'',score:null,priority:'',importedStage:'',notes:''});
 
 export default function QuickAddDialog({onClose,onConfirm,onBuild,onError}:Props) {
-  const [facts,setFacts]=useState(blankFacts),[busy,setBusy]=useState(false);
+  const [facts,setFacts]=useState(blankFacts),[busy,setBusy]=useState(false),[preset,setPreset]=useState('general');
   const update=(key:keyof LeadFacts,value:unknown)=>setFacts(current=>({...current,[key]:value}));
-  const data:QuickAddData={facts};
+  const data:QuickAddData={facts,preset:preset || undefined};
   async function finish(build:boolean) {
     setBusy(true);
     try {await (build?onBuild(data):onConfirm(data));onClose();}
@@ -35,6 +37,7 @@ export default function QuickAddDialog({onClose,onConfirm,onBuild,onError}:Props
       <div className="two-fields"><Field label="Phone"><input value={facts.phone} onChange={e=>update('phone',e.target.value)} placeholder="+251…"/></Field><Field label="Email"><input type="email" value={facts.email} onChange={e=>update('email',e.target.value)}/></Field></div>
       <div className="two-fields"><Field label="Google rating"><input type="number" min="0" max="5" step="0.1" value={facts.rating??''} onChange={e=>update('rating',e.target.value===''?null:Number(e.target.value))}/></Field><Field label="Review count"><input type="number" min="0" step="1" value={facts.reviews??''} onChange={e=>update('reviews',e.target.value===''?null:Number(e.target.value))}/></Field></div>
       <Field label="Verification note"><textarea rows={3} value={facts.evidence} onChange={e=>update('evidence',e.target.value)}/></Field>
-    </div><div className="modal-footer"><button className="btn" disabled={busy} onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !facts.name.trim() || !facts.mapsUrl.trim()} onClick={()=>void finish(false)}><MapPin size={15}/>Add prospect</button><button className="btn primary" disabled={busy || !facts.name.trim() || !facts.mapsUrl.trim()} onClick={()=>void finish(true)}>Add and build <ArrowRight size={15}/></button></div>
+      <Field label="Starter content" hint="Prefills services, FAQs and a colour theme. Everything stays editable."><select value={preset} onChange={e=>setPreset(e.target.value)}><option value="">Blank</option>{Object.entries(PRESETS).map(([key,p])=><option key={key} value={key}>{p.label}</option>)}</select></Field>
+    </div><div className="modal-footer"><button className="btn" disabled={busy} onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !facts.name.trim()} onClick={()=>void finish(false)}><MapPin size={15}/>Add prospect</button><button className="btn primary" disabled={busy || !facts.name.trim()} onClick={()=>void finish(true)}>Add and build <ArrowRight size={15}/></button></div>
   </Modal>;
 }

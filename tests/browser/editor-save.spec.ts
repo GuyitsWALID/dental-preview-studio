@@ -20,7 +20,7 @@ test('saving a JSONB-reordered draft enables preview publishing and keeps real e
   const name=page.getByLabel('Clinic name',{exact:true});
   await name.fill('Saved Clinic '+Date.now());
   await page.getByLabel('Preview URL slug').fill('Saved Clinic Website');
-  await expect(page.getByRole('button',{name:'Publish preview',exact:true})).toHaveAttribute('title','Save your draft before publishing.');
+  await expect(page.getByRole('button',{name:'Publish preview',exact:true})).toHaveAttribute('title','Saves your draft, then publishes it.');
   await page.getByRole('button',{name:'Save draft',exact:true}).click();
   await expect(page.getByText('Private draft saved.',{exact:false})).toBeVisible();
   await expect(page.getByLabel('Preview URL slug')).toHaveValue('saved-clinic-website');
@@ -30,7 +30,7 @@ test('saving a JSONB-reordered draft enables preview publishing and keeps real e
 
   await page.getByRole('tab',{name:'Content',exact:true}).click();
   await page.getByLabel('Main heading').fill('A new unsaved heading');
-  await expect(page.getByRole('button',{name:'Publish preview',exact:true})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Publish preview',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Save draft',exact:true}).click();
   await expect(page.getByRole('button',{name:'Publish preview',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'Publish preview',exact:true}).click();

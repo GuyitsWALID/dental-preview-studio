@@ -102,3 +102,10 @@ test('ZIP larger than 4.5 MB rebuilds offline with local assets and no private d
   c.pages={mode:'multipage',contact:true};await writeFile(path.join(dir,'source/clinic.json'),JSON.stringify(c));execFileSync(process.execPath,['source/build.mjs'],{cwd:dir});assert.ok(await readFile(path.join(dir,'site/contact/index.html'),'utf8'));
   c.pages.mode='landing';await writeFile(path.join(dir,'source/clinic.json'),JSON.stringify(c));execFileSync(process.execPath,['source/build.mjs'],{cwd:dir});await assert.rejects(readFile(path.join(dir,'site/contact/index.html')));
 });
+test('starter presets prefill valid services, FAQs and theme; unknown presets stay blank',()=>{
+  const preset=createClinicConfig({name:'Preset Dental',preset:'ortho'});
+  assert.equal(preset.services.length,5);assert.equal(preset.faqs.length,2);assert.equal(preset.theme.primary,'#123C69');
+  assert.ok(preset.services.every(s=>s.title && s.summary && s.id));assert.deepEqual(validateSiteConfig(preset),[]);
+  const blank=createClinicConfig({name:'Plain Dental',preset:'does-not-exist'});
+  assert.equal(blank.services.length,0);assert.equal(blank.faqs.length,0);assert.equal(blank.theme.primary,'#154A52');
+});
