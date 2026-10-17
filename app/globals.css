@@ -8,3 +8,4 @@
 
 .clinic-research{min-width:0}.clinic-research dl>div{padding:8px 0;border-bottom:1px solid var(--line)}.clinic-research dt{font-weight:600;font-size:11px}.clinic-research dd{margin:4px 0 0;overflow-wrap:anywhere;font-size:12px}.clinic-research .check{margin-top:14px}.clinic-research .repeat-card p{overflow-wrap:anywhere}
 .image-url{display:flex;gap:7px;margin:2px 0 14px}.image-url input{flex:1;font-size:11px}.image-url .btn{font-size:11px;padding-inline:12px}
+.maps-fetch{display:flex;align-items:center;gap:10px;margin:-4px 0 14px}.maps-fetch .btn{font-size:12px;min-height:34px;padding:7px 12px}

@@ -5,13 +5,14 @@ import { readWorkspace, mutateWorkspace, adminClient, getObject, removeObject } 
 import { publishProject, prepareExport, saveImage, useOliCover, configHash } from '@/lib/server/projects';
 import { confirmImport } from '@/lib/server/imports';
 import { createClinicConfig, slugify, validateSiteConfig, productionIssues, safeHttps } from '@/lib/site/renderer.mjs';
+import { mapsPlaceId, placeFacts, placeReviews, placePhotoRefs, cleanMapsReviews } from '@/lib/places';
+import { lookupClinic, fetchPhotoBytes, mapsHosts } from '@/lib/server/places';
 import type { ClinicSiteConfig } from '@/lib/site/types';
 import { STAGES, factsOf, type LeadFacts, type Prospect, type Project } from '@/lib/types';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const fail = (error:unknown) => NextResponse.json({error:error instanceof Error?error.message:'The action could not be completed.'},{status:error instanceof HttpError?error.status:400});
 const normalizedLeadKey=(name:string,address:string)=>`${name.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ')}|${address.normalize('NFKC').toLowerCase().trim().replace(/\s+/g,' ')}`;
-const mapsPlaceId=(url:string)=>{try{const parsed=new URL(url);return parsed.searchParams.get('query_place_id') || parsed.searchParams.get('place_id') || '';}catch{return '';}};
 export async function GET() {
   try {
     await requireOwner();
@@ -64,6 +65,18 @@ export async function POST(request:Request) {
       if (!response.ok) throw new HttpError(400,'The image could not be downloaded.');
       return NextResponse.json({asset:await saveImage(Buffer.from(await response.arrayBuffer()))});
     }
+    if (action==='fetchMapsInfo') {
+      const apiKey=process.env.FIRECRAWL_API_KEY;
+      if (!apiKey) throw new HttpError(503,'Set FIRECRAWL_API_KEY to fetch clinic details from Google Maps.');
+      const url=String(body.url || ''),name=String(body.name || '').slice(0,300),address=String(body.address || '').slice(0,300);
+      const place=await lookupClinic(apiKey,{url,name,address}),placeId=mapsPlaceId(url) || String(place.id || '');
+      const facts=placeFacts(place,placeId,name,address),reviews=placeReviews(place,facts.mapsUrl,new Date().toISOString().slice(0,10)),photos:{path:string;alt:string;width:number;height:number}[]=[];
+      for (const ref of placePhotoRefs(place)) {
+        try {const asset=await saveImage(await fetchPhotoBytes(ref.name));photos.push({path:asset.path,alt:ref.alt,width:asset.width,height:asset.height});}
+        catch { /* A photo that cannot be downloaded is skipped; the listing facts still load. */ }
+      }
+      return NextResponse.json({facts,reviews,photos},{headers:{'Cache-Control':'private, no-store'}});
+    }
     const result=await mutateWorkspace(state=>{
       if (action==='updateProspect') {
         const p=state.prospects.find(p=>p.id===body.id);if(!p)throw new HttpError(404,'Prospect not found.');
@@ -97,7 +110,6 @@ export async function POST(request:Request) {
         const name=value('name',300),address=value('address'),phone=value('phone',40),email=value('email',320),mapsUrl=value('mapsUrl'),evidence=value('evidence',10000);
         const rating=incoming.rating==null?null:Number(incoming.rating),reviews=incoming.reviews==null?null:Number(incoming.reviews);
         if(!name)throw new HttpError(400,'Clinic name is required.');
-        const mapsHosts=['www.google.com','google.com','maps.google.com','maps.app.goo.gl','goo.gl'];
         if(mapsUrl && !safeHttps(mapsUrl,mapsHosts))throw new HttpError(400,'Use a valid HTTPS Google Maps place URL.');
         if(phone && !/^\+[1-9][0-9 ()-]{6,24}$/.test(phone))throw new HttpError(400,'Use an international phone number beginning with +.');
         if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new HttpError(400,'Enter a valid email address.');
@@ -120,6 +132,10 @@ export async function POST(request:Request) {
         const p=state.prospects.find(p=>p.id===body.prospectId);if(!p)throw new HttpError(404,'Prospect not found.');
         const existing=state.projects.find(p=>p.prospectId===body.prospectId);if(existing)return {id:existing.id};
         const f=factsOf(p),config=createClinicConfig({name:f.name,address:f.address,phone:f.phone,mapsUrl:f.mapsUrl,rating:f.rating,reviews:f.reviews,checkedAt:p.provenance.researchDate,preset:typeof body.preset==='string'?body.preset:undefined});
+        const reviews=cleanMapsReviews(body.reviews);if(reviews.length)config.reviews=reviews;
+        const imageFor=(entry:unknown)=>{const e=(entry||{}) as Record<string,unknown>,asset=state.assets.find(a=>a.path===e.path);return asset?{path:asset.path,alt:String(e.alt || '').slice(0,300) || asset.path,width:asset.width,height:asset.height}:null;};
+        const photos=Array.isArray(body.photos)?body.photos.slice(0,2):[],hero=imageFor(photos[0]),cover=imageFor(photos[1]);
+        if(hero)config.heroImage=hero;if(cover)config.coverImage=cover;
         const stem=slugify(f.name);let slug=stem,n=2;while(state.projects.some(p=>p.slug===slug))slug=`${stem}-${n++}`;
         const project:Project={id:randomUUID(),prospectId:p.id,slug,config,updatedAt:new Date().toISOString(),publishedReleaseId:null,publishedConfigHash:null};
         state.projects.push(project);return {id:project.id};
