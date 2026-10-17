@@ -76,6 +76,17 @@ test('design controls render consistently and legacy version-one configs remain 
   clinic.sectionOrder=['contact','contact','services','reviews','faq'];
   assert.ok(validateSiteConfig(clinic).length);
 });
+test('section background colours stay optional, validate as hex and render as CSS variables',()=>{
+  const clinic=createClinicConfig({name:'Palette Dental'});
+  assert.equal(renderClinicSite(clinic,{mode:'draft'})['index.html'].includes('--bg-body'),false);
+  Object.assign(clinic.theme,{bg:'#0b1b2b',headerBg:'#123456',heroBg:'#abcdef',sectionBg:'#f0f0f0',footerBg:'#010203'});
+  assert.deepEqual(validateSiteConfig(clinic),[]);
+  const html=renderClinicSite(clinic,{mode:'draft'})['index.html'],style=html.slice(html.indexOf('<style>'),html.indexOf('</style>'));
+  for(const v of ['--bg-body:#0b1b2b','--bg-header:#123456','--bg-hero:#abcdef','--bg-section:#f0f0f0','--bg-footer:#010203']) assert.ok(style.includes(v),v);
+  clinic.theme.bg='navy';assert.ok(validateSiteConfig(clinic).length);
+  clinic.theme.bg='';assert.deepEqual(validateSiteConfig(clinic),[]);
+  assert.equal(renderClinicSite(clinic,{mode:'draft'})['index.html'].includes('--bg-body'),false);
+});
 test('production canonicals, sitemap and schema use the final domain; preview stays noindex',()=>{
   const c=createClinicConfig({name:'Cedar Dental',address:'Bole',phone:'+251911234567'});assert.ok(productionIssues(c).length);
   c.seo.siteUrl='https://cedar.example';c.form.whatsappNumber='+251911234567';c.form.whatsappConfirmed=true;c.pages={mode:'multipage',contact:true};c.services=[{id:'cleaning',title:'Dental cleaning',summary:'Clinic-approved summary',body:'Clinic-approved description',dedicatedPage:true,seoTitle:'Cleaning at Cedar',seoDescription:'A distinct description',faqs:[]}];

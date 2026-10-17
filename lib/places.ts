@@ -39,8 +39,13 @@ export function placeFacts(place: GooglePlace, placeId: string, fallbackName = '
     mapsUrl: mapsUrlFor(name, placeId),
   };
 }
+// Google's own "highest rating" sort can't be driven from the scraper, so we
+// rank whatever reviews the page exposes: keep only strong ones, best first.
+export function topReviews<T extends { rating?: number | null }>(reviews: T[], min = 4, limit = 5): T[] {
+  return reviews.filter(r => typeof r.rating === 'number' && r.rating >= min).sort((a, b) => (b.rating as number) - (a.rating as number)).slice(0, limit);
+}
 export function placeReviews(place: GooglePlace, mapsUrl: string, today: string): SiteReview[] {
-  return (place.reviews || []).flatMap(r => {
+  return topReviews((place.reviews || []).flatMap(r => {
     const quote = (r.text?.text || '').trim();
     if (!quote) return [];
     const review: SiteReview = {
@@ -55,7 +60,7 @@ export function placeReviews(place: GooglePlace, mapsUrl: string, today: string)
     if (Number.isInteger(r.rating) && (r.rating as number) >= 1 && (r.rating as number) <= 5) review.rating = r.rating as number;
     if (r.relativePublishTimeDescription) review.dateLabel = String(r.relativePublishTimeDescription).slice(0, 60);
     return [review];
-  }).slice(0, 5);
+  }), 4, 5);
 }
 export function placePhotoRefs(place: GooglePlace): MapsPhotoRef[] {
   return (place.photos || []).slice(0, 2).flatMap(p => {

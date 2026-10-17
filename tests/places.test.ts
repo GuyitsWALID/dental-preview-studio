@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapsPlaceId, mapsUrlFor, placeFacts, placeReviews, placePhotoRefs, placeFromFirecrawl, cleanMapsReviews } from '../lib/places';
+import { mapsPlaceId, mapsUrlFor, placeFacts, placeReviews, placePhotoRefs, placeFromFirecrawl, cleanMapsReviews, topReviews } from '../lib/places';
 
 test('a Google Maps URL yields its place id and a canonical dedupe URL', () => {
   assert.equal(mapsPlaceId('https://www.google.com/maps/place/Cedar/@9,38,17z/data=!3m1!4b1?query_place_id=ChIJ123'), 'ChIJ123');
@@ -18,21 +18,28 @@ test('listing facts map to clinic fields with nulls preserved and Maps URL rebui
   assert.equal(bare.rating, null); assert.equal(bare.reviews, null); assert.equal(bare.phone, '');
 });
 
-test('only text reviews are kept, capped at five, with integer ratings and Google attribution', () => {
+test('only text reviews rated 4 or more are kept, ordered best-first, capped at five', () => {
   const reviews = placeReviews({ reviews: [
+    { rating: 4, text: { text: 'Very good' }, authorAttribution: { displayName: 'Joe' } },
     { rating: 5, text: { text: '  Excellent care  ' }, authorAttribution: { displayName: 'Sara' }, googleMapsUri: 'https://www.google.com/maps/review/1', relativePublishTimeDescription: '2 months ago' },
-    { rating: 4, text: {} },
+    { rating: 3, text: { text: 'Average' }, authorAttribution: { displayName: 'Mia' } },
     { rating: 9, text: { text: 'Out of range rating is dropped' } },
     { rating: 3.5, text: { text: 'Fractional rating is dropped' } },
+    { rating: 5, text: {} },
   ] }, 'https://www.google.com/maps/place/x', '2026-10-17');
-  assert.equal(reviews.length, 3);
+  assert.deepEqual(reviews.map(review => review.rating), [5, 4]);
   assert.equal(reviews[0].quote, 'Excellent care'); assert.equal(reviews[0].author, 'Sara');
-  assert.equal(reviews[0].rating, 5); assert.equal(reviews[0].platform, 'Google Maps'); assert.equal(reviews[0].checkedAt, '2026-10-17');
+  assert.equal(reviews[0].platform, 'Google Maps'); assert.equal(reviews[0].checkedAt, '2026-10-17');
   assert.equal(reviews[0].dateLabel, '2 months ago'); assert.equal(reviews[0].sourceUrl, 'https://www.google.com/maps/review/1');
-  assert.equal(reviews[1].rating, undefined); assert.equal(reviews[1].sourceUrl, 'https://www.google.com/maps/place/x');
-  assert.equal(reviews[2].rating, undefined);
-  const many = placeReviews({ reviews: Array.from({ length: 8 }, () => ({ text: { text: 'ok' }, authorAttribution: { displayName: 'X' } })) }, 'https://www.google.com/maps', '2026-10-17');
-  assert.equal(many.length, 5);
+  assert.equal(reviews[1].sourceUrl, 'https://www.google.com/maps/place/x');
+  const many = placeReviews({ reviews: Array.from({ length: 8 }, (_, i) => ({ rating: i % 2 ? 4 : 5, text: { text: 'ok' }, authorAttribution: { displayName: 'X' } })) }, 'https://www.google.com/maps', '2026-10-17');
+  assert.equal(many.length, 5); assert.ok(many.every(review => (review.rating as number) >= 4));
+});
+
+test('unrated reviews are dropped so nothing below four stars can slip through', () => {
+  assert.deepEqual(topReviews([{ rating: 3 }, { rating: 5 }, { rating: 4 }, { rating: 5 }, {}, { rating: 2 }]).map(review => review.rating), [5, 5, 4]);
+  assert.equal(topReviews(Array.from({ length: 6 }, () => ({ rating: 5 }))).length, 5);
+  assert.deepEqual(topReviews([{ rating: 4 }, { rating: 3 }], 4, 5).map(review => review.rating), [4]);
 });
 
 test('photo references keep two usable entries with author attribution', () => {

@@ -13,7 +13,7 @@ export type SiteSection = 'services' | 'reviews' | 'about' | 'faq' | 'contact';
 export interface ClinicSiteConfig {
   version: 1;
   name: string; tagline: string;
-  theme: { primary: string; accent: string; highlight: string; font: 'jakarta' | 'manrope' };
+  theme: { primary: string; accent: string; highlight: string; font: 'jakarta' | 'manrope'; bg?: string; headerBg?: string; heroBg?: string; sectionBg?: string; footerBg?: string };
   logo: SiteImage | null; heroImage: SiteImage | null; coverImage: SiteImage | null;
   hero: { eyebrow: string; title: string; body: string };
   about: { title: string; body: string };

@@ -29,7 +29,7 @@ for(const b of btns){const t=((await b.innerText().catch(()=>''))||'').trim();if
 await page.waitForTimeout(3000);
 const rows=await page.$$eval('[data-review-id]',els=>els.map(e=>{const lines=(e.innerText||'').split(String.fromCharCode(10)).map(s=>s.trim()).filter(Boolean);const author=lines.find(l=>!/review|ago$|^Like$|^Share$|^[0-9]+$/.test(l))||'';const dateLabel=lines.find(l=>/ago$/.test(l))||'';const star=e.querySelector('[role="img"][aria-label*="star"]');const rating=Number((String(star&&star.getAttribute('aria-label')||'').match(/[0-9]+/)||[])[0])||null;const text=lines.filter(l=>l!==author&&l!==dateLabel&&!/^Like$|^Share$/.test(l)).sort((a,b)=>b.length-a.length)[0]||'';return {id:e.getAttribute('data-review-id'),author,rating,dateLabel,text};}).filter(r=>r.text&&r.text.length>3));
 const seen=new Set();const out=[];
-for(const r of rows){if(!r.id||seen.has(r.id))continue;seen.add(r.id);out.push({author:r.author,rating:r.rating,dateLabel:r.dateLabel,text:r.text});if(out.length>=5)break;}
+for(const r of rows){if(!r.id||seen.has(r.id))continue;seen.add(r.id);out.push({author:r.author,rating:r.rating,dateLabel:r.dateLabel,text:r.text});if(out.length>=15)break;}
 console.log(JSON.stringify({reviews:out}));`;
 
 interface FirecrawlReview { author?: string; rating?: number; text?: string; dateLabel?: string }
